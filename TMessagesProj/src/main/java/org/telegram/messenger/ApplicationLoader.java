@@ -795,4 +795,19 @@ public class ApplicationLoader extends Application {
     public File getDownloadedUpdateFile() {
         return null;
     }
+    public static File getDataDirFixed() {
+        try {
+            File path = applicationContext.getFilesDir();
+            if (path != null) {
+                return path.getParentFile();
+            }
+        } catch (Exception ignored) {
+        }
+        try {
+            ApplicationInfo info = applicationContext.getApplicationInfo();
+            return new File(info.dataDir);
+        } catch (Exception ignored) {
+        }
+        return new File("/data/data/" + BuildConfig.APPLICATION_ID + "/");
+    }
 }

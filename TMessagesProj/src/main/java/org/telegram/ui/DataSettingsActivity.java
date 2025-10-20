@@ -19,7 +19,6 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
-import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.recyclerview.widget.DefaultItemAnimator;
@@ -59,8 +58,12 @@ import org.telegram.ui.Components.voip.VoIPHelper;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.concurrent.atomic.AtomicReference;
 
+import kotlin.Unit;
+import tw.nekomimi.nekogram.ui.BottomBuilder;
 import tw.nekomimi.nekogram.NekoConfig;
+import tw.nekomimi.nekogram.utils.EnvUtil;
 
 public class DataSettingsActivity extends BaseFragment {
 
@@ -69,7 +72,7 @@ public class DataSettingsActivity extends BaseFragment {
     @SuppressWarnings("FieldCanBeLocal")
     private LinearLayoutManager layoutManager;
 
-   private ArrayList<File> storageDirs;
+//    private ArrayList<File> storageDirs;
 
     private int mediaDownloadSectionRow;
     private int mobileRow;
@@ -131,13 +134,7 @@ public class DataSettingsActivity extends BaseFragment {
         usageSectionRow = rowCount++;
         storageUsageRow = rowCount++;
         dataUsageRow = rowCount++;
-        storageNumRow = -1;
-        if (Build.VERSION.SDK_INT >= 19) {
-            storageDirs = AndroidUtilities.getRootDirs();
-            if (storageDirs.size() > 1) {
-                storageNumRow = rowCount++;
-            }
-        }
+        storageNumRow = rowCount++;
         usageSection2Row = rowCount++;
         mediaDownloadSectionRow = rowCount++;
         mobileRow = rowCount++;
@@ -176,7 +173,7 @@ public class DataSettingsActivity extends BaseFragment {
 //        autoplaySectionRow = rowCount++;
         streamSectionRow = rowCount++;
         enableStreamRow = rowCount++;
-        if (true || BuildVars.DEBUG_VERSION) {
+        if (BuildVars.DEBUG_VERSION) {
             enableMkvRow = rowCount++;
             enableAllStreamRow = rowCount++;
         } else {
@@ -473,75 +470,39 @@ public class DataSettingsActivity extends BaseFragment {
             } else if (position == dataUsageRow) {
                 presentFragment(new DataUsage2Activity());
             } else if (position == storageNumRow) {
-                AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
-                builder.setTitle(LocaleController.getString(R.string.StoragePath));
-                final LinearLayout linearLayout = new LinearLayout(getParentActivity());
-                linearLayout.setOrientation(LinearLayout.VERTICAL);
-                builder.setView(linearLayout);
+                BottomBuilder builder = new BottomBuilder(getParentActivity());
 
-                String dir = storageDirs.get(0).getAbsolutePath();
-                if (!TextUtils.isEmpty(SharedConfig.storageCacheDir)) {
-                    for (int a = 0, N = storageDirs.size(); a < N; a++) {
-                        String path = storageDirs.get(a).getAbsolutePath();
-                        if (path.startsWith(SharedConfig.storageCacheDir)) {
-                            dir = path;
-                            break;
-                        }
-                    }
-                }
+                builder.addTitle(LocaleController.getString(R.string.StoragePath));
 
-                boolean fullString = true;
-                try {
-                    fullString = storageDirs.size() != 2 || storageDirs.get(0).getAbsolutePath().contains("/storage/emulated/") == storageDirs.get(1).getAbsolutePath().contains("/storage/emulated/");
-                } catch (Exception ignore) {}
+                AtomicReference<String> target = new AtomicReference<>();
 
-                for (int a = 0, N = storageDirs.size(); a < N; a++) {
-                    File file = storageDirs.get(a);
-                    String storageDir = file.getAbsolutePath();
-                    LanguageCell cell = new LanguageCell(context);
-                    cell.setPadding(AndroidUtilities.dp(4), 0, AndroidUtilities.dp(4), 0);
-                    cell.setTag(a);
-                    String description;
-                    boolean isInternal = storageDir.contains("/storage/emulated/");
-                    if (fullString && !isInternal) {
-                        description = LocaleController.formatString(R.string.StoragePathFreeValueExternal, AndroidUtilities.formatFileSize(file.getFreeSpace()), storageDir);
-                    } else {
-                        if (isInternal) {
-                            description = LocaleController.formatString(R.string.StoragePathFreeInternal, AndroidUtilities.formatFileSize(file.getFreeSpace()));
-                        } else {
-                            description = LocaleController.formatString(R.string.StoragePathFreeExternal, AndroidUtilities.formatFileSize(file.getFreeSpace()));
-                        }
+                builder.addRadioItems(EnvUtil.getAvailableDirectories(),
+                        (index, path) -> path.equals(NekoConfig.cachePath.String()), (__, path, cell) -> {
+
+                            target.set(path);
+                            builder.doRadioCheck(cell);
+
+                            return null;
+
+                        });
+
+                builder.addCancelButton();
+                builder.addOkButton((it) -> {
+
+                    if (target.get() != null) {
+
+                        NekoConfig.cachePath.setConfigString(target.get());
+                      
+                        ImageLoader.getInstance().checkMediaPaths();
+                        listAdapter.notifyItemChanged(position);
+
                     }
 
-                    cell.setValue(
-                            isInternal ? LocaleController.getString(R.string.InternalStorage) : LocaleController.getString(R.string.SdCard),
-                            description
-                    );
-                    cell.setLanguageSelected(storageDir.startsWith(dir), false);
-                    cell.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_dialogButtonSelector), 2));
-                    linearLayout.addView(cell);
-                    cell.setOnClickListener(v -> {
-                        if (!TextUtils.equals(SharedConfig.storageCacheDir, storageDir)) {
-                            if (!isInternal) {
-                                AlertDialog.Builder confirAlert = new AlertDialog.Builder(getContext());
-                                confirAlert.setTitle(LocaleController.getString(R.string.DecreaseSpeed));
-                                confirAlert.setMessage(LocaleController.getString(R.string.SdCardAlert));
-                                confirAlert.setPositiveButton(LocaleController.getString(R.string.Proceed), (dialog, which) -> {
-                                    setStorageDirectory(storageDir);
-                                    builder.getDismissRunnable().run();
-                                });
-                                confirAlert.setNegativeButton(LocaleController.getString(R.string.Back), null);
-                                confirAlert.show();
-                            } else {
-                                setStorageDirectory(storageDir);
-                                builder.getDismissRunnable().run();
-                            }
+                    return Unit.INSTANCE;
 
-                        }
-                    });
-                }
-                builder.setNegativeButton(LocaleController.getString(R.string.Cancel), null);
-                showDialog(builder.create());
+                });
+
+                builder.show();
             } else if (position == proxyRow) {
                 presentFragment(new ProxyListActivity());
             } else if (position == enableStreamRow) {
@@ -672,17 +633,7 @@ public class DataSettingsActivity extends BaseFragment {
                         );
                         textCell.setTextAndValueAndColorfulIcon(LocaleController.getString(R.string.NetworkUsage), AndroidUtilities.formatFileSize(size), true, R.drawable.msg_filled_datausage, getThemedColor(Theme.key_color_green), storageNumRow != -1);
                     } else if (position == storageNumRow) {
-                        String dir = storageDirs.get(0).getAbsolutePath();
-                        if (!TextUtils.isEmpty(SharedConfig.storageCacheDir)) {
-                            for (int a = 0, N = storageDirs.size(); a < N; a++) {
-                                String path = storageDirs.get(a).getAbsolutePath();
-                                if (path.startsWith(SharedConfig.storageCacheDir)) {
-                                    dir = path;
-                                    break;
-                                }
-                            }
-                        }
-                        final String value = dir == null || dir.contains("/storage/emulated/") ? LocaleController.getString(R.string.InternalStorage) : LocaleController.getString(R.string.SdCard);
+                        String value = NekoConfig.cachePath.String();
                         textCell.setTextAndValueAndColorfulIcon(LocaleController.getString(R.string.StoragePath), value, true, R.drawable.msg_filled_sdcard, getThemedColor(Theme.key_color_yellow), false);
                     }
                     break;
@@ -754,9 +705,9 @@ public class DataSettingsActivity extends BaseFragment {
                     } else if (position == enableCacheStreamRow) {
                         //checkCell.setTextAndCheck(LocaleController.getString(R.string.CacheStreamFile), SharedConfig.saveStreamMedia, true);
                     } else if (position == enableMkvRow) {
-                        checkCell.setTextAndCheck(LocaleController.getString(R.string.StreamMkvNax), SharedConfig.streamMkv, true);
+                        checkCell.setTextAndCheck("(beta only) Show MKV as Video", SharedConfig.streamMkv, true);
                     } else if (position == enableAllStreamRow) {
-                        checkCell.setTextAndCheck(LocaleController.getString(R.string.StreamAllVideoNax), SharedConfig.streamAllVideo, false);
+                        checkCell.setTextAndCheck("(beta only) Stream All Videos", SharedConfig.streamAllVideo, false);
                     } else if (position == autoplayGifsRow) {
                         checkCell.setTextAndCheck(LocaleController.getString(R.string.AutoplayGIF), SharedConfig.isAutoplayGifs(), true);
                     } else if (position == autoplayVideoRow) {

@@ -8,11 +8,13 @@
 
 package org.telegram.messenger;
 
+import tw.nekomimi.nekogram.NekoConfig;
 import android.content.Context;
 import android.content.res.ColorStateList;
 import android.os.Debug;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.TextUtils;
 import android.util.Log;
 
 import com.google.gson.ExclusionStrategy;
@@ -85,6 +87,47 @@ public class FileLog {
         init();
     }
 
+    /**
+     * 获取日志目录，优先使用应用内部存储的私有目录
+     */
+    private static File getLogsDir() {
+    try {
+        // 优先使用 NekoConfig 自定义缓存路径
+        String customCachePath = NekoConfig.cachePath.String();
+        if (!TextUtils.isEmpty(customCachePath)) {
+            File customDir = new File(customCachePath, "logs");
+            customDir.mkdirs();
+            if (customDir.exists() && customDir.canWrite()) {
+                if (BuildVars.LOGS_ENABLED) {
+                    Log.d("FileLog", "使用自定义缓存日志目录: " + customDir.getAbsolutePath());
+                }
+                return customDir;
+            }
+        }
+        
+        // 如果自定义路径不可用，回退到内部存储
+        File filesDir = ApplicationLoader.applicationContext.getFilesDir();
+        if (filesDir != null) {
+            File logsDir = new File(filesDir, "logs");
+            if ((logsDir.exists() || logsDir.mkdirs()) && logsDir.canWrite()) {
+                if (BuildVars.LOGS_ENABLED) {
+                    Log.d("FileLog", "使用内部存储日志目录: " + logsDir.getAbsolutePath());
+                }
+                return logsDir;
+            }
+        }
+    } catch (Exception e) {
+        if (BuildVars.LOGS_ENABLED) {
+            Log.e("FileLog", "目录创建异常: " + e.getMessage());
+        }
+    }
+    
+    // 最后回退到 AndroidUtilities.getLogsDir()
+    if (BuildVars.LOGS_ENABLED) {
+        Log.d("FileLog", "回退到默认日志目录");
+    }
+    return AndroidUtilities.getLogsDir();
+}
 
     private static Gson gson;
     private static ExclusionStrategy exclusionStrategy;
@@ -302,7 +345,8 @@ public class FileLog {
         fileDateFormat = FastDateFormat.getInstance("yyyy_MM_dd-HH_mm_ss", Locale.US);
         String date = fileDateFormat.format(System.currentTimeMillis());
         try {
-            File dir = AndroidUtilities.getLogsDir();
+            // 使用统一的日志目录获取方法
+            File dir = getLogsDir();
             if (dir == null) {
                 return;
             }
@@ -341,7 +385,7 @@ public class FileLog {
             return "";
         }
         try {
-            File dir = AndroidUtilities.getLogsDir();
+            File dir = getLogsDir();
             if (dir == null) {
                 return "";
             }
@@ -358,7 +402,7 @@ public class FileLog {
             return "";
         }
         try {
-            File dir = AndroidUtilities.getLogsDir();
+            File dir = getLogsDir();
             if (dir == null) {
                 return "";
             }
@@ -476,7 +520,7 @@ public class FileLog {
         if (!force && System.currentTimeMillis() - dumpedHeap < 30_000) return;
         dumpedHeap = System.currentTimeMillis();
         try {
-            Debug.dumpHprofData(new File(AndroidUtilities.getLogsDir(), getInstance().dateFormat.format(System.currentTimeMillis()) + "_heap.hprof").getAbsolutePath());
+            Debug.dumpHprofData(new File(getLogsDir(), getInstance().dateFormat.format(System.currentTimeMillis()) + "_heap.hprof").getAbsolutePath());
         } catch (Exception e2) {
             FileLog.e(e2);
         }
@@ -610,7 +654,7 @@ public class FileLog {
 
     public static void cleanupLogs() {
         ensureInitied();
-        File dir = AndroidUtilities.getLogsDir();
+        File dir = getLogsDir();
         if (dir == null) {
             return;
         }
