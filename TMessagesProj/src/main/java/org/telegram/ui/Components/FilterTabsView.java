@@ -156,10 +156,10 @@ public class FilterTabsView extends FrameLayout {
             if (c > 0) {
                 String counterText = String.format("%d", c);
                 int counterWidth = (int) Math.ceil(textCounterPaint.measureText(counterText));
-                int countWidth = Math.max(AndroidUtilities.dp(10), counterWidth) + AndroidUtilities.dp(10);
-                width += countWidth + AndroidUtilities.dp(6);
+                int countWidth = Math.max(AndroidUtilities.dp(6), counterWidth) + AndroidUtilities.dp(8);
+                width += countWidth + AndroidUtilities.dp(3);
             }
-            return Math.max(AndroidUtilities.dp(40), width);
+            return Math.max(AndroidUtilities.dp(28), width);
         }
 
         public boolean setTitle(String newTitle, ArrayList<TLRPC.MessageEntity> newEntities, boolean noanimate) {
@@ -428,7 +428,7 @@ public class FilterTabsView extends FrameLayout {
                     canvas.save();
                     int alpha = textPaint.getAlpha();
                     textPaint.setAlpha((int) (alpha * (animateTextChangeOut ? 1f - changeProgress : changeProgress)));
-                    canvas.translate(textX + textOffsetX + titleOffsetX, (getMeasuredHeight() - textHeight) / 2f + 1);
+                    canvas.translate(textX + textOffsetX + titleOffsetX, (getMeasuredHeight() - textHeight) / 2f );
                     titleAnimateInLayout.draw(canvas);
                     AnimatedEmojiSpan.drawAnimatedEmojis(canvas, titleAnimateInLayout, titleAnimateInLayoutEmojis, 0, null, computeVerticalScrollOffset() - AndroidUtilities.dp(6), computeVerticalScrollOffset() + computeVerticalScrollExtent(), 0, (animateTextChangeOut ? 1f - changeProgress : changeProgress), emojiColorFilter);
                     canvas.restore();
@@ -529,7 +529,7 @@ public class FilterTabsView extends FrameLayout {
                 } else {
                     x = textX + titleWidth + textSpace;
                 }
-                int countTop = (getMeasuredHeight() - AndroidUtilities.dp(20)) / 2;
+                int countTop = (getMeasuredHeight() - AndroidUtilities.dp(16)) / 2;
 
                 if (showRemove && (isEditing || editingStartAnimationProgress != 0) && counterText == null) {
                     counterPaint.setAlpha((int) (editingStartAnimationProgress * 255));
@@ -994,7 +994,9 @@ public class FilterTabsView extends FrameLayout {
     public FilterTabsView(Context context, Theme.ResourcesProvider resourcesProvider) {
         super(context);
         this.resourcesProvider = resourcesProvider;
-        textCounterPaint.setTextSize(AndroidUtilities.dp(13));
+        
+        NekoConfig.tabsTitleType.setConfigInt(NekoXConfig.TITLE_TYPE_TEXT);
+        textCounterPaint.setTextSize(AndroidUtilities.dp(11));
         textCounterPaint.setTypeface(AndroidUtilities.bold());
         textPaint.setTextSize(AndroidUtilities.dp(15));
         textPaint.setTypeface(AndroidUtilities.bold());
@@ -1182,7 +1184,7 @@ public class FilterTabsView extends FrameLayout {
         });
         ItemTouchHelper itemTouchHelper = new ItemTouchHelper(new TouchHelperCallback());
         itemTouchHelper.attachToRecyclerView(listView);
-        listView.setPadding(AndroidUtilities.dp(7), 0, AndroidUtilities.dp(7), 0);
+        listView.setPadding(AndroidUtilities.dp(1), 0, AndroidUtilities.dp(1), 0);
         listView.setClipToPadding(false);
         listView.setDrawSelectorBehind(true);
         adapter = new ListAdapter(context);
@@ -1462,7 +1464,7 @@ public class FilterTabsView extends FrameLayout {
             int tabWidth = tabs.get(a).getWidth(false);
             positionToWidth.put(a, tabWidth);
             positionToX.put(a, xOffset + additionalTabWidth / 2);
-            xOffset += tabWidth + FolderIconHelper.getPaddingTab() + additionalTabWidth;
+            xOffset += tabWidth + additionalTabWidth;
         }
     }
 
@@ -1599,7 +1601,7 @@ public class FilterTabsView extends FrameLayout {
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         if (!tabs.isEmpty()) {
-            int width = MeasureSpec.getSize(widthMeasureSpec) - AndroidUtilities.dp(7) - AndroidUtilities.dp(7);
+            int width = MeasureSpec.getSize(widthMeasureSpec) - AndroidUtilities.dp(5) - AndroidUtilities.dp(5);
             int trueTabsWidth;
             Tab firstTab = findDefaultTab();
             if (firstTab != null && !NekoConfig.hideAllTab.Bool())  {

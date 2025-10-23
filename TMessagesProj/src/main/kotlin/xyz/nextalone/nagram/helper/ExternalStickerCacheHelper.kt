@@ -24,7 +24,112 @@ import java.io.File
 object ExternalStickerCacheHelper {
     const val TAG = "ExternalStickerCache"
 
-    private val cachePath = ApplicationLoader.applicationContext.getExternalFilesDir(null)!!.resolve("caches")
+    private var _cachePath: File? = null
+    private val cachePath: File
+        get() {
+            // 使用缓存，避免重复检查
+            if (_cachePath == null || !isDirectoryUsable(_cachePath!!)) {
+                _cachePath = determineBestCachePath()
+            }
+            return _cachePath!!
+        }
+
+    /**
+     * 确定最佳缓存路径
+     */
+    private fun determineBestCachePath(): File {
+        val pathsToTry = mutableListOf<File>()
+
+        // 1. 优先尝试内部缓存目录 (getCacheDir)
+        pathsToTry.add(getCacheDirPath())
+
+        // 2. 尝试默认的外部存储路径
+        pathsToTry.add(getDefaultCachePath())
+
+        // 3. 尝试内部文件目录作为最后备选
+        pathsToTry.add(ApplicationLoader.applicationContext.filesDir.resolve("caches"))
+
+        // 按顺序尝试每个路径
+        for (path in pathsToTry) {
+            if (isDirectoryUsable(path)) {
+                logD("Using cache path: ${path.absolutePath}")
+                return path
+            }
+        }
+
+        // 如果所有路径都失败，使用默认路径并记录错误
+        val fallback = getDefaultCachePath()
+        logD("All cache paths failed, using fallback: ${fallback.absolutePath}")
+        return fallback
+    }
+
+    /**
+     * 获取内部缓存目录路径
+     */
+    private fun getCacheDirPath(): File {
+        return ApplicationLoader.applicationContext.cacheDir.resolve("sticker_cache").apply {
+            mkdirs()
+        }
+    }
+
+    /**
+     * 获取默认缓存路径（外部存储）
+     */
+    private fun getDefaultCachePath(): File {
+        return ApplicationLoader.applicationContext.getExternalFilesDir(null)!!.resolve("caches").apply {
+            mkdirs()
+        }
+    }
+
+    /**
+     * 检查目录是否可用（可读可写）
+     */
+    private fun isDirectoryUsable(directory: File): Boolean {
+        return try {
+            if (!directory.exists()) {
+                val created = directory.mkdirs()
+                if (!created) {
+                    logD("Failed to create directory: ${directory.absolutePath}")
+                    return false
+                }
+            }
+            
+            val testFile = File(directory, ".test_write")
+            val canWrite = try {
+                testFile.writeText("test")
+                testFile.delete()
+                true
+            } catch (e: Exception) {
+                false
+            }
+            
+            val result = directory.exists() && directory.isDirectory && directory.canRead() && canWrite
+            if (!result) {
+                logD("Directory not usable: ${directory.absolutePath} (exists: ${directory.exists()}, isDir: ${directory.isDirectory}, canRead: ${directory.canRead()}, canWrite: $canWrite)")
+            }
+            result
+        } catch (e: Exception) {
+            logException(e, "checking directory usability for ${directory.absolutePath}")
+            false
+        }
+    }
+
+    /**
+     * 获取当前使用的缓存路径（用于调试）
+     */
+    @JvmStatic
+    fun getCurrentCachePath(): String {
+        return cachePath.absolutePath
+    }
+
+    /**
+     * 强制重新加载缓存路径（当配置改变时调用）
+     */
+    @JvmStatic
+    fun reloadCachePath() {
+        _cachePath = null
+        logD("Cache path reloaded, current path: ${getCurrentCachePath()}")
+    }
 
     @JvmStatic
     fun checkUri(configCell: ConfigCellAutoTextCheck, context: Context) {
@@ -84,7 +189,7 @@ object ExternalStickerCacheHelper {
                 val uri = NaConfig.externalStickerCacheUri ?: return@async
                 val resolver = context.contentResolver
                 DocumentFile.fromTreeUri(context, uri)?.let { dir ->
-                    logD("Caching ${stickerSets.size} sticker set(s)...")
+                    logD("Caching ${stickerSets.size} sticker set(s) from path: ${getCurrentCachePath()}...")
                     if (dir.isDirectory) {
                         val stickerSetDirMap = dir.listFiles().run {
                             val map = mutableMapOf<String, DocumentFile>()
@@ -162,7 +267,7 @@ object ExternalStickerCacheHelper {
             try {
                 DocumentFile.fromTreeUri(context, uri)?.let { dir ->
                     val setDirName = getStickerDirName(set)
-                    logD("Refreshing cache $setDirName...")
+                    logD("Refreshing cache $setDirName from path: ${getCurrentCachePath()}...")
                     dir.findFile(setDirName)?.let {
                         it.delete()
                         logD("Deleting exist files...")
