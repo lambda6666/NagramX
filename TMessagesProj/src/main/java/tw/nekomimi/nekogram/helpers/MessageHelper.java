@@ -78,6 +78,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import tw.nekomimi.nekogram.NekoConfig;
 import xyz.nextalone.nagram.NaConfig;
 
 public class MessageHelper extends BaseController {
@@ -146,39 +147,125 @@ public class MessageHelper extends BaseController {
         return localInstance;
     }
 
-    public MessageObject getLastMessageFromUnblock(long dialogId) {
-        SQLiteCursor cursor;
-        MessageObject ret = null;
+    public interface FilteredMessageCallback {
+        void onLoaded(MessageObject result);
+    }
+
+    public void loadLastMessageSkippingFilteredAsync(long dialogId, FilteredMessageCallback callback) {
+        Utilities.globalQueue.postRunnable(() -> {
+            MessageObject result = getLastMessageSkippingFiltered(dialogId);
+            if (callback != null) {
+                AndroidUtilities.runOnUIThread(() -> callback.onLoaded(result));
+            }
+        });
+    }
+
+    public MessageObject getLastMessageSkippingFiltered(long dialogId) {
+        SQLiteCursor cursor = null;
         try {
-            cursor = getMessagesStorage().getDatabase().queryFinalized(String.format(Locale.US, "SELECT data,send_state,mid,date FROM messages_v2 WHERE uid = %d ORDER BY date DESC LIMIT %d,%d", dialogId, 0, 10));
+            cursor = getMessagesStorage().getDatabase().queryFinalized(String.format(Locale.US, "SELECT data,send_state,mid,date FROM messages_v2 WHERE uid = %d ORDER BY date DESC LIMIT %d,%d", dialogId, 0, 20));
             while (cursor.next()) {
                 NativeByteBuffer data = cursor.byteBufferValue(0);
-                if (data == null)
+                if (data == null) {
                     continue;
+                }
                 TLRPC.Message message = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
                 data.reuse();
-                if (getMessagesController().blockePeers.indexOfKey(message.from_id.user_id) < 0) {
-                    // valid message
-                    ret = new MessageObject(currentAccount, message, true, true);
-                    message.send_state = cursor.intValue(1);
-                    message.id = cursor.intValue(2);
-                    message.date = cursor.intValue(3);
-                    message.dialog_id = dialogId;
-                    // Fix username show
-                    if (getMessagesController().getUser(ret.getSenderId()) == null) {
-                        TLRPC.User user = getMessagesStorage().getUser(ret.getSenderId());
-                        if (user != null)
-                            getMessagesController().putUser(user, true);
+                MessageObject obj = new MessageObject(currentAccount, message, false, false);
+                if (NekoConfig.ignoreBlocked.Bool()) {
+                    long fromId = obj.getFromChatId();
+                    if (isBlockedUser(fromId) || AyuFilter.isBlockedChannel(fromId)) {
+                        continue;
                     }
-                    break;
+                    if (obj.replyMessageObject != null) {
+                        fromId = obj.replyMessageObject.getFromChatId();
+                        if (isBlockedUser(fromId) || AyuFilter.isBlockedChannel(fromId)) {
+                            continue;
+                        }
+                    }
+                }
+                if (AyuFilter.isFiltered(obj, null)) {
+                    continue;
+                }
+                message.send_state = cursor.intValue(1);
+                message.id = cursor.intValue(2);
+                message.date = cursor.intValue(3);
+                message.dialog_id = dialogId;
+                if (getMessagesController().getUser(obj.getSenderId()) == null) {
+                    TLRPC.User user = getMessagesStorage().getUser(obj.getSenderId());
+                    if (user != null) {
+                        getMessagesController().putUser(user, true);
+                    }
+                }
+                return obj;
+            }
+        } catch (SQLiteException e) {
+            FileLog.e("RegexFilter, SQLiteException when reading last unfiltered message", e);
+        } finally {
+            if (cursor != null) {
+                cursor.dispose();
+            }
+        }
+        return null;
+    }
+
+    public TLRPC.Message getMessage(long dialogId, long msgId) {
+        TLRPC.Message message = null;
+        SQLiteCursor cursor = null;
+        try {
+            cursor = getMessagesStorage().getDatabase().queryFinalized("SELECT data FROM messages_v2 WHERE uid = " + dialogId + " AND mid = " + msgId + " LIMIT 1");
+            while (cursor.next()) {
+                NativeByteBuffer data = cursor.byteBufferValue(0);
+                if (data != null) {
+                    message = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
+                    if (message != null) {
+                        message.readAttachPath(data, UserConfig.getInstance(currentAccount).clientUserId);
+                    }
+                    data.reuse();
                 }
             }
             cursor.dispose();
-        } catch (SQLiteException sqLiteException) {
-            FileLog.e("NekoX, ignoreBlocked, SQLiteException when read last message from unblocked user", sqLiteException);
-            return null;
+            cursor = null;
+        } catch (Exception e) {
+            FileLog.e(e);
+        } finally {
+            if (cursor != null) {
+                cursor.dispose();
+            }
         }
-        return ret;
+        return message;
+    }
+
+    public ArrayList<TLRPC.Message> getMessagesStorageMessages(long dialogId, ArrayList<Integer> messageIds) {
+        ArrayList<TLRPC.Message> messages = null;
+        SQLiteCursor cursor = null;
+        try {
+            String ids = TextUtils.join(",", messageIds);
+            cursor = getMessagesStorage().getDatabase().queryFinalized(String.format(Locale.US,"SELECT data FROM messages_v2 WHERE uid = %d AND mid IN (%s)", dialogId, ids));
+            while (cursor.next()) {
+                NativeByteBuffer data = cursor.byteBufferValue(0);
+                if (data != null) {
+                    TLRPC.Message message = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
+                    if (message != null) {
+                        message.readAttachPath(data, UserConfig.getInstance(currentAccount).clientUserId);
+                    }
+                    data.reuse();
+                    if (messages == null) {
+                        messages = new ArrayList<>();
+                    }
+                    messages.add(message);
+                }
+            }
+            cursor.dispose();
+            cursor = null;
+        } catch (SQLiteException e) {
+            FileLog.e(e);
+        } finally {
+            if (cursor != null) {
+                cursor.dispose();
+            }
+        }
+        return messages;
     }
 
     public void saveStickerToGallery(Context context, MessageObject messageObject) {
@@ -650,6 +737,15 @@ public class MessageHelper extends BaseController {
     }
 
     public static String getMessagePlainText(MessageObject messageObject, MessageObject.GroupedMessages messageGroup) {
+        if (messageGroup != null) {
+            MessageObject captionMessage = messageGroup.findCaptionMessageObject();
+            if (captionMessage != null && !TextUtils.isEmpty(captionMessage.caption)) {
+                return captionMessage.caption.toString();
+            }
+        }
+        if (messageObject == null) {
+            return null;
+        }
         if (messageObject.isPoll()) {
             TLRPC.Poll poll = ((TLRPC.TL_messageMediaPoll) messageObject.messageOwner.media).poll;
             StringBuilder pollText = new StringBuilder(poll.question.text).append("\n");
@@ -660,11 +756,6 @@ public class MessageHelper extends BaseController {
             return pollText.toString();
         } else if (!TextUtils.isEmpty(messageObject.getVoiceTranscription())) {
             return messageObject.messageOwner.voiceTranscription;
-        } else if (messageGroup != null) {
-            MessageObject captionMessage = messageGroup.findCaptionMessageObject();
-            if (captionMessage != null && !TextUtils.isEmpty(captionMessage.caption)) {
-                return captionMessage.caption.toString();
-            }
         }
         return messageObject.messageOwner.message;
     }
@@ -683,7 +774,6 @@ public class MessageHelper extends BaseController {
     private static final SpannableStringBuilder[] spannedStrings = new SpannableStringBuilder[5];
     private static final Pattern ZALGO_PATTERN = Pattern.compile("\\p{M}{4}");
     private static final Pattern ZALGO_CLEANUP = Pattern.compile("\\p{M}+");
-    private static final char[] spoilerChars = new char[]{'⠌', '⡢', '⢑', '⠨', '⠥', '⠮', '⡑'};
 
     public static void addMessageToClipboard(MessageObject selectedObject, Runnable callback) {
         String path = getPathToMessage(selectedObject);
@@ -833,29 +923,16 @@ public class MessageHelper extends BaseController {
         return text;
     }
 
-    public static CharSequence blurify(CharSequence text) {
-        StringBuilder stringBuilder = new StringBuilder(text);
-        for (int i = 0; i < text.length(); i++) {
-            stringBuilder.setCharAt(i, spoilerChars[i % spoilerChars.length]);
-        }
-        return stringBuilder;
+    public boolean isBlockedUser(long senderId) {
+        return NekoConfig.ignoreBlocked.Bool() && getMessagesController().blockePeers.indexOfKey(senderId) >= 0;
     }
 
-    public static void blurify(MessageObject messageObject) {
-        if (messageObject.messageOwner == null) {
-            return;
+    public boolean isBlockedOrFiltered(TLRPC.Message message) {
+        if (message == null) {
+            return false;
         }
-        if (!TextUtils.isEmpty(messageObject.messageText)) {
-            messageObject.messageText = blurify(messageObject.messageText);
-        }
-        if (!TextUtils.isEmpty(messageObject.messageOwner.message)) {
-            messageObject.messageOwner.message = blurify(messageObject.messageOwner.message).toString();
-        }
-        if (!TextUtils.isEmpty(messageObject.caption)) {
-            messageObject.caption = blurify(messageObject.caption);
-        }
-        if (messageObject.messageOwner.media != null) {
-            messageObject.messageOwner.media.spoiler = true;
-        }
+        long fromId = MessageObject.getFromChatId(message);
+        boolean blocked =  isBlockedUser(fromId) || AyuFilter.isBlockedChannel(fromId);
+        return blocked || AyuFilter.isFiltered(new MessageObject(currentAccount, message, false, false), null);
     }
 }

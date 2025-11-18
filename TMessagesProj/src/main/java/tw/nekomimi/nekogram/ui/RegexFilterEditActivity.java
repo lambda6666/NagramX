@@ -11,6 +11,7 @@ package tw.nekomimi.nekogram.ui;
 
 import static org.telegram.messenger.LocaleController.getString;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.text.Editable;
@@ -51,6 +52,8 @@ public class RegexFilterEditActivity extends BaseFragment {
 
     private final int filterIdx;
     private final AyuFilter.FilterModel filterModel;
+    private final long targetDialogId;
+    private final int chatFilterIdx;
     private boolean caseInsensitive;
 
     private EditTextBoldCursor editField;
@@ -64,19 +67,41 @@ public class RegexFilterEditActivity extends BaseFragment {
         filterIdx = -1;
         filterModel = null;
         caseInsensitive = true;
+        targetDialogId = 0L;
+        chatFilterIdx = -1;
+    }
+
+    public RegexFilterEditActivity(long dialogId) {
+        filterIdx = -1;
+        filterModel = null;
+        caseInsensitive = true;
+        targetDialogId = dialogId;
+        chatFilterIdx = -1;
+    }
+
+    public RegexFilterEditActivity(long dialogId, int chatFilterIdx) {
+        this.filterIdx = -1;
+        this.targetDialogId = dialogId;
+        this.chatFilterIdx = chatFilterIdx;
+        this.filterModel = AyuFilter.getChatFiltersForDialog(dialogId).size() > chatFilterIdx && chatFilterIdx >= 0 ? AyuFilter.getChatFiltersForDialog(dialogId).get(chatFilterIdx) : null;
+        this.caseInsensitive = this.filterModel == null || this.filterModel.caseInsensitive;
     }
 
     public RegexFilterEditActivity(int filterIdx) {
         this.filterIdx = filterIdx; // use -1 to CREATE, not EDIT
         this.filterModel = AyuFilter.getRegexFilters().get(filterIdx);
         this.caseInsensitive = filterModel.caseInsensitive;
+        this.targetDialogId = 0L;
+        this.chatFilterIdx = -1;
     }
 
+    @SuppressLint("ClickableViewAccessibility")
     @Override
     public View createView(Context context) {
+        boolean isEdit = (filterIdx != -1) || (chatFilterIdx != -1);
         actionBar.setBackButtonImage(R.drawable.ic_ab_back);
         actionBar.setAllowOverlayTitle(true);
-        actionBar.setTitle(getString(filterIdx == -1 ? R.string.RegexFiltersAdd : R.string.RegexFiltersEdit));
+        actionBar.setTitle(getString(!isEdit ? R.string.RegexFiltersAdd : R.string.RegexFiltersEdit));
         actionBar.setActionBarMenuOnItemClick(new ActionBar.ActionBarMenuOnItemClick() {
             @Override
             public void onItemClick(int id) {
@@ -86,7 +111,7 @@ public class RegexFilterEditActivity extends BaseFragment {
                     var text = editField.getText().toString();
 
                     if (TextUtils.isEmpty(text)) {
-                        // todo: show error toast
+                        showError();
                         return;
                     }
 
@@ -99,14 +124,23 @@ public class RegexFilterEditActivity extends BaseFragment {
                         }
 
                         errorTextView.setText(LocaleUtil.INSTANCE.htmlToString("<b>" + errorText + "</b>"));
-                        BulletinFactory.of(RegexFilterEditActivity.this).createSimpleBulletin(R.raw.error, getString(R.string.RegexFiltersAddError)).show();
+                        showError();
                         return;
                     }
 
-                    if (filterIdx == -1) {
-                        AyuFilter.addFilter(text, caseInsensitive);
-                    } else {
+                    // If editing a chat-specific filter, update that entry and return.
+                    if (chatFilterIdx != -1 && targetDialogId != 0L) {
+                        AyuFilter.editChatFilter(targetDialogId, chatFilterIdx, text, caseInsensitive);
+                    } else if (filterIdx != -1) {
+                        // editing shared filter
                         AyuFilter.editFilter(filterIdx, text, caseInsensitive);
+                    } else {
+                        // creating a new filter (shared or chat-scoped)
+                        if (targetDialogId != 0L) {
+                            AyuFilter.addChatFilter(targetDialogId, text, caseInsensitive);
+                        } else {
+                            AyuFilter.addFilter(text, caseInsensitive);
+                        }
                     }
 
                     finishFragment();
@@ -124,10 +158,17 @@ public class RegexFilterEditActivity extends BaseFragment {
         fragmentView.setOnTouchListener((v, event) -> true);
 
         editField = new EditTextBoldCursor(context);
-
         editField.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18);
         editField.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
-        // jaBBa для даунов
+        editField.setHintTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteHintText));
+        editField.setBackground(null);
+        editField.setLineColors(Theme.getColor(Theme.key_windowBackgroundWhiteInputField), Theme.getColor(Theme.key_windowBackgroundWhiteInputFieldActivated), Theme.getColor(Theme.key_text_RedRegular));
+        editField.setPadding(0, 0, 0, AndroidUtilities.dp(6));
+        editField.setCursorColor(Theme.getColor(Theme.key_chat_TextSelectionCursor));
+        editField.setCursorSize(AndroidUtilities.dp(20));
+        editField.setCursorWidth(1.5f);
+        editField.setHandlesColor(Theme.getColor(Theme.key_chat_TextSelectionCursor));
+        editField.setHighlightColor(Theme.getColor(Theme.key_chat_inTextSelectionHighlight));
         editField.addTextChangedListener(new TextWatcher() {
             @Override
             public void beforeTextChanged(CharSequence charSequence, int i, int i1, int i2) {
@@ -147,7 +188,7 @@ public class RegexFilterEditActivity extends BaseFragment {
             }
         });
 
-        if (filterIdx != -1 && filterModel != null) {
+        if (filterModel != null) {
             editField.setText(filterModel.regex);
         }
 
@@ -206,6 +247,15 @@ public class RegexFilterEditActivity extends BaseFragment {
 
     @Override
     public ArrayList<ThemeDescription> getThemeDescriptions() {
+        final ThemeDescription.ThemeDescriptionDelegate delegate = () -> {
+            if (editField != null) {
+                editField.setLineColors(Theme.getColor(Theme.key_windowBackgroundWhiteInputField), Theme.getColor(Theme.key_windowBackgroundWhiteInputFieldActivated), Theme.getColor(Theme.key_text_RedRegular));
+                editField.setCursorColor(Theme.getColor(Theme.key_chat_TextSelectionCursor));
+                editField.setHandlesColor(Theme.getColor(Theme.key_chat_TextSelectionCursor));
+                editField.setHighlightColor(Theme.getColor(Theme.key_chat_inTextSelectionHighlight));
+            }
+        };
+
         ArrayList<ThemeDescription> themeDescriptions = new ArrayList<>();
 
         themeDescriptions.add(new ThemeDescription(fragmentView, ThemeDescription.FLAG_BACKGROUND, null, null, null, null, Theme.key_windowBackgroundWhite));
@@ -217,11 +267,18 @@ public class RegexFilterEditActivity extends BaseFragment {
 
         themeDescriptions.add(new ThemeDescription(editField, ThemeDescription.FLAG_TEXTCOLOR, null, null, null, null, Theme.key_windowBackgroundWhiteBlackText));
         themeDescriptions.add(new ThemeDescription(editField, ThemeDescription.FLAG_HINTTEXTCOLOR, null, null, null, null, Theme.key_windowBackgroundWhiteHintText));
-        themeDescriptions.add(new ThemeDescription(editField, ThemeDescription.FLAG_BACKGROUNDFILTER, null, null, null, null, Theme.key_windowBackgroundWhiteInputField));
-        themeDescriptions.add(new ThemeDescription(editField, ThemeDescription.FLAG_BACKGROUNDFILTER | ThemeDescription.FLAG_DRAWABLESELECTEDSTATE, null, null, null, null, Theme.key_windowBackgroundWhiteInputFieldActivated));
+        themeDescriptions.add(new ThemeDescription(null, 0, null, null, null, delegate, Theme.key_windowBackgroundWhiteInputField));
+        themeDescriptions.add(new ThemeDescription(null, 0, null, null, null, delegate, Theme.key_windowBackgroundWhiteInputFieldActivated));
+        themeDescriptions.add(new ThemeDescription(null, 0, null, null, null, delegate, Theme.key_text_RedRegular));
+        themeDescriptions.add(new ThemeDescription(null, 0, null, null, null, delegate, Theme.key_chat_TextSelectionCursor));
+        themeDescriptions.add(new ThemeDescription(null, 0, null, null, null, delegate, Theme.key_chat_inTextSelectionHighlight));
 
         themeDescriptions.add(new ThemeDescription(helpTextView, ThemeDescription.FLAG_TEXTCOLOR, null, null, null, null, Theme.key_windowBackgroundWhiteGrayText8));
 
         return themeDescriptions;
+    }
+
+    private void showError() {
+        BulletinFactory.of(RegexFilterEditActivity.this).createSimpleBulletin(R.raw.error, getString(R.string.RegexFiltersAddError)).show();
     }
 }

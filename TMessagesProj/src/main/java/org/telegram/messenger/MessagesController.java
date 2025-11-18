@@ -122,13 +122,14 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.stream.Collectors;
 
 import tw.nekomimi.nekogram.NekoConfig;
+import tw.nekomimi.nekogram.helpers.AyuFilter;
 import tw.nekomimi.nekogram.helpers.ChatNameHelper;
+import tw.nekomimi.nekogram.helpers.MessageHelper;
 import tw.nekomimi.nekogram.utils.AlertUtil;
 import xyz.nextalone.nagram.NaConfig;
-import tw.nekomimi.nekogram.helpers.MessageHelper;
+import xyz.nextalone.nagram.helper.LocalPremiumStatusHelper;
 
 import com.radolyn.ayugram.AyuConstants;
 import com.radolyn.ayugram.messages.AyuSavePreferences;
@@ -171,8 +172,6 @@ public class MessagesController extends BaseController implements NotificationCe
     public ConcurrentHashMap<Long, Integer> dialogs_read_outbox_max = new ConcurrentHashMap<>(100, 1.0f, 2);
     public LongSparseArray<TLRPC.Dialog> dialogs_dict = new LongSparseArray<>();
     public LongSparseArray<ArrayList<MessageObject>> dialogMessage = new LongSparseArray<>();
-    // NekoX: ignoreBlocked, Messages cache for Dialog Cell
-    public LongSparseArray<MessageObject> dialogMessageFromUnblocked = new LongSparseArray<>();
     public LongSparseArray<MessageObject> dialogMessagesByRandomIds = new LongSparseArray<>();
     public LongSparseIntArray deletedHistory = new LongSparseIntArray();
     public SparseArray<MessageObject> dialogMessagesByIds = new SparseArray<>();
@@ -2599,6 +2598,7 @@ public class MessagesController extends BaseController implements NotificationCe
                 user.emoji_status = new_emoji_status;
                 getNotificationCenter().postNotificationName(NotificationCenter.userEmojiStatusUpdated, user);
             }
+            LocalPremiumStatusHelper.apply(new_emoji_status);
         } else {
             TLRPC.TL_channels_updateEmojiStatus req = new TLRPC.TL_channels_updateEmojiStatus();
             req.channel = getInputChannel(-dialogId);
@@ -2614,7 +2614,7 @@ public class MessagesController extends BaseController implements NotificationCe
         }
         getMessagesController().updateEmojiStatusUntilUpdate(dialogId, new_emoji_status);
         getNotificationCenter().postNotificationName(NotificationCenter.updateInterfaces, MessagesController.UPDATE_MASK_EMOJI_STATUS);
-        getConnectionsManager().sendRequest(r, null);
+        if (UserConfig.getInstance(currentAccount).isRealPremium()) getConnectionsManager().sendRequest(r, null);
     }
 
     public void removeFilter(DialogFilter filter) {
@@ -8669,7 +8669,7 @@ public class MessagesController extends BaseController implements NotificationCe
         loadingBlockedPeers = true;
         TLRPC.TL_contacts_getBlocked req = new TLRPC.TL_contacts_getBlocked();
         req.offset = reset ? 0 : blockePeers.size();
-        req.limit = 100;
+        req.limit = reset ? 20 : 100;
         getConnectionsManager().sendRequest(req, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
             if (response != null) {
                 TLRPC.contacts_Blocked res = (TLRPC.contacts_Blocked) response;
@@ -9110,68 +9110,65 @@ public class MessagesController extends BaseController implements NotificationCe
         // --- AyuGram hook
         int ayuDeletedMessagesCount = 0;
         if (!scheduled && NaConfig.INSTANCE.getEnableSaveDeletedMessages().Bool()) {
+            var ayuMessagesController = AyuMessagesController.getInstance();
             if (DialogObject.isEncryptedDialog(dialogId) && messages != null && !messages.isEmpty()) { // process TTL messages from secrets
-                for (int a = 0; a < messages.size(); a++) {
-                    int id = messages.get(a);
-
-                    if (AyuState.isDeletePermitted(dialogId, id)) {
-                        continue;
-                    }
-
-                    MessageObject obj = dialogMessagesByIds.get(id);
-                    if (obj == null) {
-                        var msg = getMessagesStorage().getMessage(dialogId, id);
-                        if (msg != null) {
-                            obj = new MessageObject(currentAccount, msg, false, false);
+                final ArrayList<Integer> messagesCopy = new ArrayList<>(messages);
+                final long dialogIdFinal = dialogId;
+                getMessagesStorage().getStorageQueue().postRunnable(() -> {
+                    for (int a = 0; a < messagesCopy.size(); a++) {
+                        int msgId = messagesCopy.get(a);
+                        if (AyuState.isDeletePermitted(dialogIdFinal, msgId)) {
+                            continue;
+                        }
+                        MessageObject obj = dialogMessagesByIds.get(msgId);
+                        TLRPC.Message msg;
+                        if (obj == null) {
+                            msg = MessageHelper.getInstance(currentAccount).getMessage(dialogIdFinal, msgId);
+                            if (msg != null) {
+                                obj = new MessageObject(currentAccount, msg, false, false);
+                            }
+                        }
+                        if (obj != null) {
+                            var prefs = new AyuSavePreferences(obj.messageOwner, currentAccount);
+                            prefs.setDialogId(dialogIdFinal);
+                            ayuMessagesController.onMessageDeleted(prefs);
                         }
                     }
-
-                    if (obj != null) {
-                        var prefs = new AyuSavePreferences(obj.messageOwner, currentAccount);
-                        prefs.setDialogId(dialogId);
-                        AyuMessagesController.getInstance().onMessageDeleted(prefs);
-                    }
-                }
-
-                AndroidUtilities.runOnUIThread(() -> {
-                    // invalidating views
-                    getNotificationCenter().postNotificationName(AyuConstants.MESSAGES_DELETED_NOTIFICATION, dialogId, messages);
+                    AndroidUtilities.runOnUIThread(() -> {
+                        getNotificationCenter().postNotificationName(AyuConstants.MESSAGES_DELETED_NOTIFICATION, dialogIdFinal, messagesCopy);
+                    });
                 });
             } else if (messages != null && !messages.isEmpty() && taskId != 0) { // process TTL messages
-                var invalidate = new ArrayList<Integer>();
-
-                for (var msgId : messages) {
-                    if (AyuState.isDeletePermitted(dialogId, msgId)) {
-                        continue;
-                    }
-
-                    var msg = getMessagesStorage().getMessage(dialogId, msgId);
-                    if (msg != null) {
-                        if (msg.ttl > 0 || msg.ttl_period > 0) {
-                            invalidate.add(msgId);
-
-                            var prefs = new AyuSavePreferences(msg, currentAccount);
-                            prefs.setDialogId(dialogId);
-                            AyuMessagesController.getInstance().onMessageDeleted(prefs);
+                final ArrayList<Integer> messagesCopy = new ArrayList<>(messages);
+                final long dialogIdFinal = dialogId;
+                getMessagesStorage().getStorageQueue().postRunnable(() -> {
+                    var invalidate = new ArrayList<Integer>();
+                    for (var msgId : messagesCopy) {
+                        if (AyuState.isDeletePermitted(dialogIdFinal, msgId)) {
+                            continue;
+                        }
+                        var msg = MessageHelper.getInstance(currentAccount).getMessage(dialogIdFinal, msgId);
+                        if (msg != null) {
+                            if (msg.ttl > 0 || msg.ttl_period > 0) {
+                                invalidate.add(msgId);
+                                var prefs = new AyuSavePreferences(msg, currentAccount);
+                                prefs.setDialogId(dialogIdFinal);
+                                ayuMessagesController.onMessageDeleted(prefs);
+                            }
                         }
                     }
-                }
-
-                AndroidUtilities.runOnUIThread(() -> {
-                    // invalidating views
-                    getNotificationCenter().postNotificationName(AyuConstants.MESSAGES_DELETED_NOTIFICATION, dialogId, invalidate);
+                    AndroidUtilities.runOnUIThread(() -> {
+                        getNotificationCenter().postNotificationName(AyuConstants.MESSAGES_DELETED_NOTIFICATION, dialogIdFinal, invalidate);
+                    });
                 });
             } else if ((messages != null && !messages.isEmpty())) { // process manual deletion of deleted messages
-                var ayuMessagesController = AyuMessagesController.getInstance();
                 var userId = UserConfig.getInstance(currentAccount).clientUserId;
-
                 ArrayList<Integer> permittedForAyuDeletion = new ArrayList<>();
                 for (var msgId : messages) {
                     if (AyuState.isDeletePermitted(dialogId, msgId)) {
                         permittedForAyuDeletion.add(msgId);
                     }
                 }
-
                 var existingMessageIds = ayuMessagesController.getExistingMessageIds(userId, dialogId, permittedForAyuDeletion);
                 if (!existingMessageIds.isEmpty()) {
                     Utilities.globalQueue.postRunnable(() -> ayuMessagesController.deleteMessages(userId, dialogId, existingMessageIds));
@@ -10794,6 +10791,12 @@ public class MessagesController extends BaseController implements NotificationCe
                     PrintingUser pu = arr.get(0);
                     TLRPC.User user = getUser(pu.userId);
                     if (user == null) {
+                        continue;
+                    }
+                    if (NekoConfig.ignoreBlocked.Bool() && getMessagesController().blockePeers.indexOfKey(user.id) >= 0) {
+                        continue;
+                    }
+                    if (AyuFilter.isBlockedChannel(user.id)) {
                         continue;
                     }
                     final boolean isGroup = key < 0 && !isEncryptedChat;
@@ -12870,9 +12873,6 @@ public class MessagesController extends BaseController implements NotificationCe
             ArrayList<MessageObject> newMessages = new ArrayList<>();
             for (int a = 0; a < dialogsRes.messages.size(); a++) {
                 TLRPC.Message message = dialogsRes.messages.get(a);
-                if (NekoConfig.ignoreBlocked.Bool() && getMessagesController().blockePeers.indexOfKey(message.peer_id.user_id) >= 0) {
-                    continue;
-                }
                 if (message.date == 0) {
                     continue;
                 }
@@ -18770,44 +18770,46 @@ public class MessagesController extends BaseController implements NotificationCe
 
         // --- AyuGram request hook
         if (NaConfig.INSTANCE.getEnableSaveDeletedMessages().Bool() && deletedMessages != null) {
-            var currentTimeS = (int)(currentTime / 1000);
-            var messagesStorage = getMessagesStorage();
-            var userId = getAccountInstance().getUserConfig().clientUserId;
             var ayuMessagesController = AyuMessagesController.getInstance();
-            for (int a = 0, size = deletedMessages.size(); a < size; a++) {
-                var possibleDialogId = deletedMessages.keyAt(a);
-                var messageIds = deletedMessages.valueAt(a);
-
-                var dialogIds = new ArrayList<Long>();
-
-                if (possibleDialogId == 0) {
-                    // Telegram sometimes won't give us dialog id directly...
-                    var possibleIds = messagesStorage.getDialogIdsToUpdate(possibleDialogId, messageIds);
-                    if (possibleIds != null && !possibleIds.isEmpty()) {
-                        dialogIds = possibleIds;
+            var deletedMessagesFinal = deletedMessages.clone();
+            getMessagesStorage().getStorageQueue().postRunnable(() -> {
+                var notificationsToSend = new LongSparseArray<ArrayList<Integer>>();
+                for (int a = 0, size = deletedMessagesFinal.size(); a < size; a++) {
+                    var possibleDialogId = deletedMessagesFinal.keyAt(a);
+                    var messageIds = deletedMessagesFinal.valueAt(a);
+                    var dialogIds = new ArrayList<Long>();
+                    if (possibleDialogId == 0) {
+                        // Telegram sometimes won't give us dialog id directly...
+                        var possibleIds = getMessagesStorage().getDialogIdsToUpdate(possibleDialogId, messageIds);
+                        if (possibleIds != null && !possibleIds.isEmpty()) {
+                            dialogIds = possibleIds;
+                        }
+                    }
+                    if (dialogIds.isEmpty()) {
+                        dialogIds.add(possibleDialogId);
+                    }
+                    for (var dialogId : dialogIds) {
+                        var messagesToSave = MessageHelper.getInstance(currentAccount).getMessagesStorageMessages(dialogId, messageIds);
+                        if (messagesToSave != null && !messagesToSave.isEmpty()) {
+                            for (var msg : messagesToSave) {
+                                var topicId = MessageObject.getTopicId(currentAccount, msg, isForum(dialogId));
+                                var prefs = new AyuSavePreferences(msg, currentAccount, dialogId, topicId, msg.id, (int)(currentTime / 1000));
+                                ayuMessagesController.onMessageDeleted(prefs);
+                            }
+                        }
+                        notificationsToSend.put(dialogId, messageIds);
                     }
                 }
-
-                if (dialogIds.isEmpty()) {
-                    dialogIds.add(possibleDialogId);
-                }
-
-                for (var dialogId : dialogIds) {
-                    for (var msgId : messageIds) {
-                        var msg = messagesStorage.getMessage(dialogId, msgId);
-                        var topicId = msg != null ? MessageObject.getTopicId(currentAccount, msg, isForum(dialogId)) : 0;
-
-                        // TLRPC.Message msg, int accountId, long dialogId, int topicId, int messageId, int requestCatchTime
-                        var prefs = new AyuSavePreferences(msg, currentAccount, dialogId, topicId, msgId, currentTimeS);
-                        ayuMessagesController.onMessageDeleted(prefs);
-                    }
-
+                if (!notificationsToSend.isEmpty()) {
                     AndroidUtilities.runOnUIThread(() -> {
-                        // invalidating views
-                        getNotificationCenter().postNotificationName(AyuConstants.MESSAGES_DELETED_NOTIFICATION, dialogId, messageIds);
+                        for (int i = 0, n = notificationsToSend.size(); i < n; i++) {
+                            long dialogId = notificationsToSend.keyAt(i);
+                            ArrayList<Integer> messageIds = notificationsToSend.valueAt(i);
+                            getNotificationCenter().postNotificationName(AyuConstants.MESSAGES_DELETED_NOTIFICATION, dialogId, messageIds);
+                        }
                     });
                 }
-            }
+            });
         }
         // --- AyuGram request hook
 
@@ -20862,12 +20864,6 @@ public class MessagesController extends BaseController implements NotificationCe
                     MessageObject msg = messages.get(i);
                     if (msg != null && lastMessage != null && (msg.getId() == lastMessage.getId() || msg.hasValidGroupId() && lastMessage.hasValidGroupId() && msg.getGroupIdForUse() == lastMessage.getGroupIdForUse())) {
                         arrayList.add(msg);
-                    }
-                }
-                if (NekoConfig.ignoreBlocked.Bool() && blockePeers.indexOfKey(lastMessage.getSenderId()) >= 0) {
-                    ArrayList<MessageObject> preMsg = dialogMessage.get(dialogId);
-                    if (!preMsg.isEmpty() && blockePeers.indexOfKey(preMsg.get(0).getSenderId()) < 0) {
-                        dialogMessageFromUnblocked.put(dialogId, preMsg.get(0));
                     }
                 }
                 dialogMessage.put(dialogId, arrayList);

@@ -51,6 +51,8 @@
     <string name="DeleteCloudBackupFailed">Failed to clear cloud data</string>
     <string name="DeleteCloudBackupSuccess">Cloud data cleared</string>
     <string name="CloudConfigNoBackupToDelete">No data to clear</string>
+    <string name="ClearRegexFilters">Clear</string>
+    <string name="ClearRegexFiltersAlertMessage">Are you sure you want to clear all saved regex filters? This will remove both shared and chat-specific filters.</string>
     <string name="PreferredTranslateTargetLang">Custom preferred language list</string>
     <string name="PreferredTranslateTargetLangExample">e.g. ja, zh_cn, zh_tw</string>
     <string name="PreferredTranslateTargetLangName">Preferred Languages</string>
@@ -58,11 +60,16 @@
     <string name="ClearDeletedAlertMessage">Are you sure you want to clear all deleted messages in this chat?</string>
     <string name="ForwardsRestrictedInfoAyuDeleted">Forwarding is not allowed.</string>
     <string name="RegexFiltersNotice">Tap to edit.</string>
+    <string name="RegexFiltersImport">Import</string>
+    <string name="RegexFiltersExport">Export</string>
+    <string name="RegexFiltersImportSuccess">Filters imported.</string>
+    <string name="RegexFiltersImportError">Failed to import filters from clipboard.</string>
+    <string name="RegexFiltersExportError">Failed to export filters.</string>
     <string name="botCommandConfirmTitle">Send Command</string>
     <string name="botCommandConfirmText">Do you want to send this command?\n\n%s</string>
     <string name="DisableScreenshotDetection">Disable Screenshot Detection</string>
     <string name="MessageSavingSaveMedia">Save Media</string>
-    <string name="MessageSavingSaveMediaHint">Click for More</string>
+    <string name="MessageSavingSaveMediaHint">Click for More.</string>
     <string name="MessageSavingSaveMediaInPrivateChats">… in Private Chats</string>
     <string name="MessageSavingSaveMediaInPublicChannels">… in Public Channels</string>
     <string name="MessageSavingSaveMediaInPrivateChannels">… in Private Channels</string>
@@ -252,4 +259,16 @@
     <string name="ExportSettingsIncludeApiKeys">Include API Keys</string>
     <string name="DisableInAppBrowserGestures">Disable Gestures</string>
     <string name="HowToObtain">How to obtain?</string>
+    <string name="BlockChannel">Block channel</string>
+    <string name="UnblockChannel">Unblock channel</string>
+    <string name="BlockedChannels">Blocked Channels</string>
+    <string name="BlockedChannelsCount_one">%1$d blocked channel</string>
+    <string name="BlockedChannelsCount_other">%1$d blocked channels</string>
+    <string name="BlockedChannelsInfo">You can hide messages from blocked channels in groups. %s</string>
+    <string name="ChannelBlocked">Channel blocked.</string>
+    <string name="ChannelUnblocked">Channel unblocked.</string>
+    <string name="BlockedChannelsEmpty">No blocked channels yet</string>
+    <string name="UnblockAllChannelsWarn">Are you sure you want to unblock **all channels**?</string>
+    <string name="BlockChannelsUnavailable">Some channels are temporarily unavailable.</string>
+    <string name="FixLinkPreview">Fix Link Preview</string>
 </resources>

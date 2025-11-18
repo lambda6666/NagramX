@@ -74,9 +74,12 @@ import java.util.function.Consumer;
 
 import tw.nekomimi.nekogram.NekoConfig;
 import tw.nekomimi.nekogram.helpers.AppRestartHelper;
+import tw.nekomimi.nekogram.helpers.AyuFilter;
+import tw.nekomimi.nekogram.helpers.MessageHelper;
 import xyz.nextalone.nagram.NaConfig;
 import com.radolyn.ayugram.messages.AyuMessagesController;
 import com.radolyn.ayugram.messages.AyuSavePreferences;
+import com.radolyn.ayugram.proprietary.AyuMessageUtils;
 
 public class MessagesStorage extends BaseController {
 
@@ -12407,6 +12410,15 @@ public class MessagesStorage extends BaseController {
 
                     int mentions_count = mentionCounts.get(key, -1);
                     int unread_count = messagesCounts.get(key, -1);
+                    // ignoreBlocked start
+                    boolean isBlockedOrFiltered = MessageHelper.getInstance(currentAccount).isBlockedOrFiltered(message);
+                    if (isBlockedOrFiltered) {
+                        message.unread = false;
+                        message.media_unread = false;
+                        unread_count--;
+                        unread_count = Math.max(0, unread_count);
+                    }
+                    // ignoreBlocked end
                     if (unread_count == -1) {
                         unread_count = 0;
                     } else {
@@ -14312,7 +14324,8 @@ public class MessagesStorage extends BaseController {
         }
     }
 
-    public ArrayList<Long> markMessagesAsDeleted(long dialogId, ArrayList<Integer> messages, boolean useQueue, boolean deleteFiles, int mode, int topicId) {
+    public ArrayList<Long> markMessagesAsDeleted(long dialogId, ArrayList<Integer> messages, boolean useQueue, boolean deleteFilesOrig, int mode, int topicId) {
+        final boolean deleteFiles = deleteFilesOrig && !AyuMessageUtils.shouldSaveMedia(currentAccount, dialogId);
         if (messages.isEmpty()) {
             return null;
         }
@@ -15273,6 +15286,9 @@ public class MessagesStorage extends BaseController {
                                             var prefs = new AyuSavePreferences(oldMessage, currentAccount);
                                             prefs.setDialogId(dialogId);
                                             AyuMessagesController.getInstance().onMessageEdited(prefs, message);
+                                        }
+                                        if (NaConfig.INSTANCE.getRegexFiltersEnabled().Bool()) {
+                                            AyuFilter.onMessageEdited(message.id, dialogId);
                                         }
                                     }
                                     // --- AyuGram hook
@@ -17937,8 +17953,8 @@ public class MessagesStorage extends BaseController {
 
     // AyuGram
     public ArrayList<Long> getDialogIdsToUpdate(long dialogId, ArrayList<Integer> messages) {
+        SQLiteCursor cursor = null;
         try {
-            SQLiteCursor cursor;
             String ids = TextUtils.join(",", messages);
             var dialogsToUpdate = new HashSet<Long>();
             if (dialogId != 0) {
@@ -17954,6 +17970,10 @@ public class MessagesStorage extends BaseController {
             return new ArrayList<>(dialogsToUpdate);
         } catch (Exception e) {
             FileLog.e(e);
+        } finally {
+            if (cursor != null) {
+                cursor.dispose();
+            }
         }
         return null;
     }

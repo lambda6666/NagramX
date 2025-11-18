@@ -99,6 +99,18 @@ object NaConfig {
             ConfigItem.configTypeBool,
             true
         )
+    val showTextTranslate =
+        addConfig(
+            "TextTranslate",
+            ConfigItem.configTypeBool,
+            true
+        )
+    val textStyleOrder =
+        addConfig(
+            "TextStyleOrder",
+            ConfigItem.configTypeString,
+            "translate,bold,italic,mono,code,strike,underline,quote,spoiler,link,mention,regular"
+        )
     val combineMessage =
         addConfig(
             "CombineMessage",
@@ -345,26 +357,11 @@ object NaConfig {
             ConfigItem.configTypeString,
             ""
         )
-    val externalStickerCache =
+    val useLocalEmojiStatusData =
         addConfig(
-            "ExternalStickerCache",
+            "useLocalEmojiStatusData",
             ConfigItem.configTypeString,
             ""
-        )
-    var externalStickerCacheUri: Uri?
-        get() = externalStickerCache.String().let { return if (it.isBlank()) null else it.toUri() }
-        set(value) = externalStickerCache.setConfigString(value.toString())
-    val externalStickerCacheAutoRefresh =
-        addConfig(
-            "ExternalStickerCacheAutoRefresh",
-            ConfigItem.configTypeBool,
-            false
-        )
-    val externalStickerCacheDirNameType =
-        addConfig(
-            "ExternalStickerCacheDirNameType",
-            ConfigItem.configTypeInt,
-            0
         )
     val disableMarkdown =
         addConfig(
@@ -467,6 +464,24 @@ object NaConfig {
             "RegexFiltersEnableInChats",
             ConfigItem.configTypeBool,
             false
+        )
+    val regexChatFiltersData =
+        addConfig(
+            "RegexChatFiltersData",
+            ConfigItem.configTypeString,
+            "[]"
+        )
+    val regexFiltersExcludedDialogs =
+        addConfig(
+            "RegexFiltersExcludedDialogs",
+            ConfigItem.configTypeString,
+            "[]"
+        )
+    val blockedChannelsData =
+        addConfig(
+            "BlockedChannelsData",
+            ConfigItem.configTypeString,
+            "[]"
         )
     val showTimeHint =
         addConfig(
@@ -1335,6 +1350,18 @@ object NaConfig {
             ConfigItem.configTypeBool,
             false
         )
+    val idDcType =
+        addConfig(
+            "IdDcType",
+            ConfigItem.configTypeInt,
+            1
+        )
+    val fixLinkPreview =
+        addConfig(
+            "FixLinkPreview",
+            ConfigItem.configTypeBool,
+            true
+        )
 
     val preferredTranslateTargetLangList = ArrayList<String>()
     fun updatePreferredTranslateTargetLangList() {
@@ -1384,6 +1411,9 @@ object NaConfig {
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
             pushServiceTypeInAppDialog.setConfigBool(false)
+        }
+        if (!preferences.getBoolean("ShowIdAndDc", true)) {
+            idDcType.setConfigInt(0)
         }
     }
 

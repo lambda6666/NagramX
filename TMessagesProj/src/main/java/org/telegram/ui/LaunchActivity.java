@@ -260,10 +260,10 @@ import tw.nekomimi.nekogram.helpers.remote.UpdateHelper;
 import tw.nekomimi.nekogram.settings.GhostModeActivity;
 import tw.nekomimi.nekogram.settings.NekoSettingsActivity;
 import tw.nekomimi.nekogram.utils.AlertUtil;
+import tw.nekomimi.nekogram.utils.AndroidUtil;
 import tw.nekomimi.nekogram.utils.BrowserUtils;
 import tw.nekomimi.nekogram.utils.ProxyUtil;
 import xyz.nextalone.nagram.NaConfig;
-import xyz.nextalone.nagram.helper.ExternalStickerCacheHelper;
 import tw.nekomimi.nekogram.ui.icons.IconsResources;
 
 public class LaunchActivity extends BasePermissionsActivity implements INavigationLayout.INavigationLayoutDelegate, NotificationCenter.NotificationCenterDelegate, DialogsActivity.DialogsActivityDelegate, IPipActivity {
@@ -1763,8 +1763,6 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
             NotificationCenter.getInstance(currentAccount).removeObserver(this, NotificationCenter.currentUserPremiumStatusChanged);
             NotificationCenter.getInstance(currentAccount).removeObserver(this, NotificationCenter.chatSwitchedForum);
             NotificationCenter.getInstance(currentAccount).removeObserver(this, NotificationCenter.storiesEnabledUpdate);
-            // Na: [ExternalStickerCache] remove observers
-            ExternalStickerCacheHelper.removeNotificationObservers(currentAccount);
         }
         currentAccount = UserConfig.selectedAccount;
         NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.openBoostForUsersDialog);
@@ -1788,8 +1786,6 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.currentUserPremiumStatusChanged);
         NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.chatSwitchedForum);
         NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.storiesEnabledUpdate);
-        // Na: [ExternalStickerCache] add observers
-        ExternalStickerCacheHelper.addNotificationObservers(currentAccount);
     }
 
     private void checkLayout() {
@@ -3575,17 +3571,19 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                 }
             } else if (open_settings == 7 || open_settings == 8 || open_settings == 9) {
                 CharSequence bulletinText = null;
-                boolean can = BuildVars.DEBUG_PRIVATE_VERSION; // TODO: check source
+                boolean can = true || BuildVars.DEBUG_PRIVATE_VERSION; // TODO: check source
                 if (!can) {
                     bulletinText = "Locked in release.";
                 } else if (open_settings == 7) {
                     bulletinText = "Logs enabled.";
-                    ApplicationLoader.applicationContext.getSharedPreferences("systemConfig", Context.MODE_PRIVATE).edit().putBoolean("logsEnabled", BuildVars.LOGS_ENABLED = true).commit();
+                    AndroidUtil.toggleLogs();
+                    // ApplicationLoader.applicationContext.getSharedPreferences("systemConfig", Context.MODE_PRIVATE).edit().putBoolean("logsEnabled", BuildVars.LOGS_ENABLED = true).commit();
                 } else if (open_settings == 8) {
                     ProfileActivity.sendLogs(LaunchActivity.this, false);
                 } else if (open_settings == 9) {
                     bulletinText = "Logs disabled.";
-                    ApplicationLoader.applicationContext.getSharedPreferences("systemConfig", Context.MODE_PRIVATE).edit().putBoolean("logsEnabled", BuildVars.LOGS_ENABLED = false).commit();
+                    AndroidUtil.toggleLogs();
+                    // ApplicationLoader.applicationContext.getSharedPreferences("systemConfig", Context.MODE_PRIVATE).edit().putBoolean("logsEnabled", BuildVars.LOGS_ENABLED = false).commit();
                 }
 
                 if (bulletinText != null) {

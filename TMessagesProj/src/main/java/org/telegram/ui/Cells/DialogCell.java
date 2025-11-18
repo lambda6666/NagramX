@@ -377,6 +377,9 @@ public class DialogCell extends BaseCell implements StoriesListPlaceProvider.Ava
     private boolean isForum;
     private ArrayList<MessageObject> groupMessages;
     private boolean clearingDialog;
+    private boolean loadingFilteredMessage;
+    private MessageObject filteredMessageCache;
+    private int lastCheckedMessageId;
     private CharSequence lastMessageString;
     private int dialogsType;
     private int folderId;
@@ -3044,15 +3047,55 @@ public class DialogCell extends BaseCell implements StoriesListPlaceProvider.Ava
                         clearingDialog = MessagesController.getInstance(currentAccount).isClearingDialog(dialog.id);
                         groupMessages = MessagesController.getInstance(currentAccount).dialogMessage.get(dialog.id);
                         message = groupMessages != null && groupMessages.size() > 0 ? groupMessages.get(0) : null;
-                        if (message != null && NekoConfig.ignoreBlocked.Bool() && MessagesController.getInstance(currentAccount).blockePeers.indexOfKey(message.getSenderId()) >= 0) {
-                            if (MessagesController.getInstance(currentAccount).dialogMessageFromUnblocked.get(dialog.id) != null)
-                                message = MessagesController.getInstance(currentAccount).dialogMessageFromUnblocked.get(dialog.id);
-                            else {
-                                message = MessageHelper.getInstance(currentAccount).getLastMessageFromUnblock(dialog.id);
-                                MessagesController.getInstance(currentAccount).dialogMessageFromUnblocked.put(dialog.id, message);
+                        // Message filter: if last message is blocked/filtered, try to pick previous unfiltered for preview
+                        if (message != null) {
+                            int currentMessageId = message.getId();
+                            if (currentMessageId != lastCheckedMessageId) {
+                                lastCheckedMessageId = currentMessageId;
+                                filteredMessageCache = null;
+                                loadingFilteredMessage = false;
                             }
-                            // Username show may be abnormal if User who send `message` is not loaded in (never enter chat since boot, esp after cold starting)
+                            boolean blocked = false;
+                            boolean replyBlocked = false;
+                            if (NekoConfig.ignoreBlocked.Bool() && ChatObject.isMegagroup(MessagesController.getInstance(currentAccount).getChat(-dialog.id))) {
+                                blocked = MessagesController.getInstance(currentAccount).blockePeers.indexOfKey(message.getFromChatId()) >= 0;
+                                blocked = blocked || AyuFilter.isBlockedChannel(message.getFromChatId());
+                                if (message.replyMessageObject != null) {
+                                    long fromId = message.replyMessageObject.getFromChatId();
+                                    replyBlocked = MessagesController.getInstance(currentAccount).blockePeers.indexOfKey(fromId) >= 0;
+                                    replyBlocked = replyBlocked || AyuFilter.isBlockedChannel(fromId);
+                                }
+                            }
+                            if (blocked || replyBlocked || AyuFilter.isFiltered(message, null)) {
+                                if (filteredMessageCache != null && filteredMessageCache.getDialogId() == dialog.id) {
+                                    message = filteredMessageCache;
+                                    groupMessages = null;
+                                } else if (!loadingFilteredMessage) {
+                                    loadingFilteredMessage = true;
+                                    final long dialogId = dialog.id;
+                                    message = null;
+                                    groupMessages = null;
+                                    MessageHelper.getInstance(currentAccount).loadLastMessageSkippingFilteredAsync(
+                                        dialogId,
+                                        (result) -> {
+                                            filteredMessageCache = result;
+                                            loadingFilteredMessage = false;
+                                            update(0);
+                                        }
+                                    );
+                                } else {
+                                    message = null;
+                                    groupMessages = null;
+                                }
+                            } else {
+                                filteredMessageCache = null;
+                            }
+                        } else {
+                            lastCheckedMessageId = 0;
+                            loadingFilteredMessage = false;
+                            filteredMessageCache = null;
                         }
+                        // Message filter end
                         lastUnreadState = message != null && message.isUnread();
                         TLRPC.Chat localChat = MessagesController.getInstance(currentAccount).getChat(-dialog.id);
                         boolean isForumCell = localChat != null && localChat.forum && !isTopic;
@@ -3076,7 +3119,7 @@ public class DialogCell extends BaseCell implements StoriesListPlaceProvider.Ava
                         }
                         markUnread = dialog.unread_mark;
                         currentEditDate = message != null ? message.messageOwner.edit_date : 0;
-                        lastMessageDate = dialog.last_message_date;
+                        lastMessageDate = message != null ? message.messageOwner.date : dialog.last_message_date; // Show time of the preview message we actually display
                         if (dialogsType == 7 || dialogsType == 8) {
                             MessagesController.DialogFilter filter = MessagesController.getInstance(currentAccount).selectedDialogFilter[dialogsType == 8 ? 1 : 0];
                             drawPin = filter != null && filter.pinnedDialogs.indexOfKey(dialog.id) >= 0;
@@ -3463,19 +3506,6 @@ public class DialogCell extends BaseCell implements StoriesListPlaceProvider.Ava
             boolean newStateStoriesIsEmpty = StoriesUtilities.getPredictiveUnreadState(MessagesController.getInstance(currentAccount).getStoriesController(), getDialogId()) == StoriesUtilities.STATE_EMPTY;
             if (!newStateStoriesIsEmpty || (!currentStoriesIsEmpty && newStateStoriesIsEmpty)) {
                 invalidate = true;
-            }
-        }
-
-        if (message != null) {
-            MessageObject captionMessage = getCaptionMessage();
-            // --- AyuGram hook
-            boolean isFiltered = AyuFilter.isFiltered(message, null) || (captionMessage != null && AyuFilter.isFiltered(captionMessage, null));
-            // --- NaGram hook
-            isFiltered = isFiltered || (message.messageOwner != null && message.messageOwner.hide);
-            isFiltered = isFiltered || (NekoConfig.ignoreBlocked.Bool() && MessagesController.getInstance(currentAccount).blockePeers.indexOfKey(message.getFromChatId()) >= 0);
-            if (isFiltered) {
-                MessageHelper.blurify(message);
-                if (captionMessage != null) MessageHelper.blurify(captionMessage);
             }
         }
 

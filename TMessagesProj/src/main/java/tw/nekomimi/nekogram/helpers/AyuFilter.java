@@ -1,47 +1,60 @@
-/*
- * This is the source code of AyuGram for Android.
- *
- * We do not and cannot prevent the use of our code,
- * but be respectful and credit the original author.
- *
- * Copyright @Radolyn, 2023
- */
-
 package tw.nekomimi.nekogram.helpers;
 
-import android.text.SpannableStringBuilder;
 import android.text.TextUtils;
-import android.util.LongSparseArray;
+
+import androidx.collection.LruCache;
 
 import com.google.gson.Gson;
 import com.google.gson.annotations.Expose;
 
 import org.telegram.messenger.Emoji;
+import org.telegram.messenger.FileLog;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
+import org.telegram.messenger.MessagesStorage;
 import org.telegram.messenger.UserConfig;
 import org.telegram.tgnet.TLRPC;
-import org.telegram.ui.Components.TranscribeButton;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
+import java.util.HashSet;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
+import tw.nekomimi.nekogram.NekoConfig;
 import xyz.nextalone.nagram.NaConfig;
 
 public class AyuFilter {
+    private static final Object cacheLock = new Object();
+    private static final int PER_DIALOG_CACHE_LIMIT = 1000;
+    private static final ConcurrentHashMap<Long, LruCache<Integer, Boolean>> filteredCache = new ConcurrentHashMap<>();
+    private static volatile ArrayList<FilterModel> filterModels;
+    private static volatile ArrayList<ChatFilterEntry> chatFilterEntries;
+    private static volatile HashSet<Long> excludedDialogs;
+    private static volatile HashSet<Long> blockedChannels;
+
     public static ArrayList<FilterModel> getRegexFilters() {
-        var str = NaConfig.INSTANCE.getRegexFiltersData().String();
-
-        FilterModel[] arr = new Gson().fromJson(str, FilterModel[].class);
-
-        return new ArrayList<>(Arrays.asList(arr));
+        if (filterModels == null) {
+            synchronized (cacheLock) {
+                if (filterModels == null) {
+                    var str = NaConfig.INSTANCE.getRegexFiltersData().String();
+                    FilterModel[] arr = new Gson().fromJson(str, FilterModel[].class);
+                    if (arr != null) {
+                        filterModels = new ArrayList<>(Arrays.asList(arr));
+                        for (var filter : filterModels) {
+                            filter.buildPattern();
+                        }
+                    } else {
+                        filterModels = new ArrayList<>();
+                    }
+                }
+            }
+        }
+        return filterModels;
     }
 
     public static void addFilter(String text, boolean caseInsensitive) {
-        var list = getRegexFilters();
-
+        var list = new ArrayList<>(getRegexFilters());
         FilterModel filterModel = new FilterModel();
         filterModel.regex = text;
         filterModel.caseInsensitive = caseInsensitive;
@@ -49,137 +62,93 @@ public class AyuFilter {
         filterModel.disabledGroups = new ArrayList<>();
         filterModel.enabledGroups.add(0L);
         list.add(0, filterModel);
-        var str = new Gson().toJson(list);
-        NaConfig.INSTANCE.getRegexFiltersData().setConfigString(str);
-
-        AyuFilter.rebuildCache();
+        saveFilter(list);
     }
 
     public static void editFilter(int filterIdx, String text, boolean caseInsensitive) {
-        var list = getRegexFilters();
-
+        var list = new ArrayList<>(getRegexFilters());
+        if (filterIdx < 0 || filterIdx >= list.size()) {
+            return;
+        }
         FilterModel filterModel = list.get(filterIdx);
         filterModel.regex = text;
         filterModel.caseInsensitive = caseInsensitive;
-
-        var str = new Gson().toJson(list);
-        NaConfig.INSTANCE.getRegexFiltersData().setConfigString(str);
-
-        AyuFilter.rebuildCache();
+        saveFilter(list);
     }
 
     public static void saveFilter(ArrayList<FilterModel> filterModels1) {
         var str = new Gson().toJson(filterModels1);
         NaConfig.INSTANCE.getRegexFiltersData().setConfigString(str);
-
         AyuFilter.rebuildCache();
     }
 
     public static void removeFilter(int filterIdx) {
-        var list = getRegexFilters();
+        var list = new ArrayList<>(getRegexFilters());
+        if (filterIdx < 0 || filterIdx >= list.size()) {
+            return;
+        }
         list.remove(filterIdx);
-
-        var str = new Gson().toJson(list);
-        NaConfig.INSTANCE.getRegexFiltersData().setConfigString(str);
-
-        AyuFilter.rebuildCache();
+        saveFilter(list);
     }
 
     public static CharSequence getMessageText(MessageObject selectedObject, MessageObject.GroupedMessages selectedObjectGroup) {
-        CharSequence messageTextToTranslate = null;
-        if (selectedObject.type != MessageObject.TYPE_EMOJIS && selectedObject.type != MessageObject.TYPE_ANIMATED_STICKER && selectedObject.type != MessageObject.TYPE_STICKER) {
-            messageTextToTranslate = getMessageCaption(selectedObject, selectedObjectGroup);
-            if (messageTextToTranslate == null && selectedObject.isPoll()) {
-                try {
-                    TLRPC.Poll poll = ((TLRPC.TL_messageMediaPoll) selectedObject.messageOwner.media).poll;
-                    StringBuilder pollText = new StringBuilder(poll.question.text).append("\n");
-                    for (TLRPC.PollAnswer answer : poll.answers)
-                        pollText.append("\n\uD83D\uDD18 ").append(answer.text.text);
-                    messageTextToTranslate = pollText.toString();
-                } catch (Exception ignored) {
-                }
-            }
-            if (messageTextToTranslate == null && MessageObject.isMediaEmpty(selectedObject.messageOwner)) {
-                messageTextToTranslate = getMessageContent(selectedObject);
-            }
-            if (messageTextToTranslate != null && Emoji.fullyConsistsOfEmojis(messageTextToTranslate)) {
-                messageTextToTranslate = null;
-            }
-        }
-        if (selectedObject.translated || selectedObject.isRestrictedMessage) {
-            messageTextToTranslate = null;
-        }
-        return messageTextToTranslate;
-    }
-
-    private static CharSequence getMessageCaption(MessageObject messageObject, MessageObject.GroupedMessages group) {
-        String restrictionReason = MessagesController.getInstance(UserConfig.selectedAccount).getRestrictionReason(messageObject.messageOwner.restriction_reason);
-        if (!TextUtils.isEmpty(restrictionReason)) {
-            return restrictionReason;
-        }
-        if (messageObject.isVoiceTranscriptionOpen() && !TranscribeButton.isTranscribing(messageObject)) {
-            return messageObject.getVoiceTranscription();
-        }
-        if (messageObject.caption != null) {
-            return messageObject.caption;
-        }
-        if (group == null) {
+        if (selectedObject == null) {
             return null;
         }
-        CharSequence caption = null;
-        for (int a = 0, N = group.messages.size(); a < N; a++) {
-            MessageObject message = group.messages.get(a);
-            if (message.caption != null) {
-                if (caption != null) {
-                    return null;
-                }
-                caption = message.caption;
-            }
+        if (selectedObject.type == MessageObject.TYPE_EMOJIS || selectedObject.type == MessageObject.TYPE_ANIMATED_STICKER || selectedObject.type == MessageObject.TYPE_STICKER) {
+            return null;
         }
-        return caption;
-    }
-
-    private static CharSequence getMessageContent(MessageObject messageObject) {
-        SpannableStringBuilder str = new SpannableStringBuilder();
-        String restrictionReason = MessagesController.getInstance(UserConfig.selectedAccount).getRestrictionReason(messageObject.messageOwner.restriction_reason);
-        if (!TextUtils.isEmpty(restrictionReason)) {
-            str.append(restrictionReason);
-        } else if (messageObject.caption != null) {
-            str.append(messageObject.caption);
-        } else {
-            str.append(messageObject.messageText);
+        CharSequence messageText = MessageHelper.getMessagePlainText(selectedObject, selectedObjectGroup);
+        if (messageText != null && Emoji.fullyConsistsOfEmojis(messageText)) {
+            messageText = null;
         }
-        return str.toString();
+        if (selectedObject.translated || selectedObject.isRestrictedMessage) {
+            messageText = null;
+        }
+        return messageText;
     }
-
-    private static ArrayList<FilterModel> filterModels;
-    private static LongSparseArray<HashMap<Integer, Boolean>> filteredCache;
 
     public static void rebuildCache() {
-        filterModels = getRegexFilters();
-
-        for (var filter : filterModels) {
-            filter.buildPattern();
+        synchronized (cacheLock) {
+            filterModels = null;
+            chatFilterEntries = null;
+            excludedDialogs = null;
+            filteredCache.clear();
         }
-
-        filteredCache = new LongSparseArray<>();
     }
 
-    private static boolean isFiltered(CharSequence text, long dialogId) {
-        if (!NaConfig.INSTANCE.getRegexFiltersEnabled().Bool()) {
-            return false;
-        }
-
-        if (TextUtils.isEmpty(text)) {
-            return false;
-        }
-
-        for (var pattern : filterModels) {
-            if (!pattern.isEnabled(dialogId)) {
-                continue;
+    private static boolean isFilteredInternal(CharSequence text, long dialogId) {
+        if (chatFilterEntries != null) {
+            for (var entry : chatFilterEntries) {
+                if (entry.dialogId == dialogId) {
+                    if (entry.filters != null) {
+                        for (var pattern : entry.filters) {
+                            if (!pattern.isEnabled(dialogId)) {
+                                continue;
+                            }
+                            if (pattern.pattern != null && pattern.pattern.matcher(text).find()) {
+                                return true;
+                            }
+                        }
+                    }
+                    break;
+                }
             }
-            if (pattern.pattern.matcher(text).find()) {
-                return true;
+        }
+
+        boolean isPrivateDialog = dialogId > 0;
+        if (isPrivateDialog && !NaConfig.INSTANCE.getRegexFiltersEnableInChats().Bool()) {
+            return false;
+        }
+
+        if (filterModels != null) {
+            for (var pattern : filterModels) {
+                if (!pattern.isEnabled(dialogId)) {
+                    continue;
+                }
+                if (pattern.pattern.matcher(text).find()) {
+                    return true;
+                }
             }
         }
 
@@ -191,41 +160,301 @@ public class AyuFilter {
             return false;
         }
 
-        if (msg == null) {
+        if (msg == null || msg.isOutOwner()) {
+            return false;
+        }
+
+        var text = getMessageText(msg, group);
+        if (TextUtils.isEmpty(text)) {
             return false;
         }
 
         if (filterModels == null) {
-            rebuildCache();
+            getRegexFilters();
         }
-
-        Boolean res;
+        if (chatFilterEntries == null) {
+            getChatFilterEntries();
+        }
 
         long dialogId = msg.getDialogId();
-        var cached = filteredCache.get(dialogId);
-        if (cached != null) {
-            res = cached.get(msg.getId());
-            if (res != null) {
-                return res;
+        if (isDialogExcluded(dialogId)) {
+            return false;
+        }
+
+        LruCache<Integer, Boolean> dialogCache = filteredCache.computeIfAbsent(dialogId, k -> new LruCache<>(PER_DIALOG_CACHE_LIMIT));
+        Boolean result;
+
+        synchronized (dialogCache) {
+            result = dialogCache.get(msg.getId());
+        }
+
+        if (result != null) {
+            return result;
+        }
+
+        result = isFilteredInternal(text, dialogId);
+
+        synchronized (dialogCache) {
+            dialogCache.put(msg.getId(), result);
+            if (group != null && group.messages != null && !group.messages.isEmpty()) {
+                for (var m : group.messages) {
+                    dialogCache.put(m.getId(), result);
+                }
             }
         }
 
-        res = isFiltered(getMessageText(msg, group), dialogId);
+        return result;
+    }
 
-        if (cached == null) {
-            cached = new HashMap<>();
-            filteredCache.put(dialogId, cached);
-        }
-
-        cached.put(msg.getId(), res);
-
-        if (group != null && group.messages != null && !group.messages.isEmpty()) {
-            for (var m : group.messages) {
-                cached.put(m.getId(), res);
+    public static ArrayList<ChatFilterEntry> getChatFilterEntries() {
+        if (chatFilterEntries == null) {
+            synchronized (cacheLock) {
+                if (chatFilterEntries == null) {
+                    var str = NaConfig.INSTANCE.getRegexChatFiltersData().String();
+                    try {
+                        ChatFilterEntry[] arr = new Gson().fromJson(str, ChatFilterEntry[].class);
+                        if (arr != null) {
+                            chatFilterEntries = new ArrayList<>(Arrays.asList(arr));
+                            for (var entry : chatFilterEntries) {
+                                if (entry.filters == null) continue;
+                                for (var f : entry.filters) {
+                                    f.buildPattern();
+                                }
+                            }
+                        } else {
+                            chatFilterEntries = new ArrayList<>();
+                        }
+                    } catch (Exception e) {
+                        chatFilterEntries = new ArrayList<>();
+                    }
+                }
             }
         }
+        return chatFilterEntries;
+    }
 
-        return res;
+    public static void saveChatFilterEntries(ArrayList<ChatFilterEntry> entries) {
+        var str = new Gson().toJson(entries);
+        NaConfig.INSTANCE.getRegexChatFiltersData().setConfigString(str);
+        AyuFilter.rebuildCache();
+    }
+
+    public static ArrayList<FilterModel> getChatFiltersForDialog(long dialogId) {
+        var entries = getChatFilterEntries();
+        for (var e : entries) {
+            if (e.dialogId == dialogId) {
+                return e.filters != null ? e.filters : new ArrayList<>();
+            }
+        }
+        return new ArrayList<>();
+    }
+
+    public static void addChatFilter(long dialogId, String text, boolean caseInsensitive) {
+        var entries = new ArrayList<>(getChatFilterEntries());
+        ChatFilterEntry target = null;
+        for (var e : entries) {
+            if (e.dialogId == dialogId) {
+                target = e;
+                break;
+            }
+        }
+        if (target == null) {
+            target = new ChatFilterEntry();
+            target.dialogId = dialogId;
+            entries.add(target);
+        }
+
+        FilterModel filterModel = new FilterModel();
+        filterModel.regex = text;
+        filterModel.caseInsensitive = caseInsensitive;
+        filterModel.enabledGroups = new ArrayList<>();
+        filterModel.disabledGroups = new ArrayList<>();
+        filterModel.enabledGroups.add(0L);
+        if (target.filters == null) {
+            target.filters = new ArrayList<>();
+        }
+        target.filters.add(0, filterModel);
+
+        saveChatFilterEntries(entries);
+    }
+
+    public static void editChatFilter(long dialogId, int filterIdx, String text, boolean caseInsensitive) {
+        var entries = new ArrayList<>(getChatFilterEntries());
+        for (var e : entries) {
+            if (e.dialogId == dialogId) {
+                if (e.filters != null && filterIdx >= 0 && filterIdx < e.filters.size()) {
+                    var fm = e.filters.get(filterIdx);
+                    fm.regex = text;
+                    fm.caseInsensitive = caseInsensitive;
+                    saveChatFilterEntries(entries);
+                }
+                return;
+            }
+        }
+    }
+
+    public static void removeChatFilter(long dialogId, int filterIdx) {
+        var entries = new ArrayList<>(getChatFilterEntries());
+        for (int i = 0; i < entries.size(); i++) {
+            var e = entries.get(i);
+            if (e.dialogId == dialogId) {
+                if (e.filters != null && filterIdx >= 0 && filterIdx < e.filters.size()) {
+                    e.filters.remove(filterIdx);
+                    if (e.filters.isEmpty()) {
+                        entries.remove(i);
+                    }
+                    saveChatFilterEntries(entries);
+                }
+                return;
+            }
+        }
+    }
+
+    private static HashSet<Long> getExcludedDialogs() {
+        if (excludedDialogs == null) {
+            synchronized (cacheLock) {
+                if (excludedDialogs == null) {
+                    try {
+                        String str = NaConfig.INSTANCE.getRegexFiltersExcludedDialogs().String();
+                        Long[] arr = new Gson().fromJson(str, Long[].class);
+                        excludedDialogs = new HashSet<>();
+                        if (arr != null) {
+                            excludedDialogs.addAll(Arrays.asList(arr));
+                        }
+                    } catch (Exception e) {
+                        excludedDialogs = new HashSet<>();
+                    }
+                }
+            }
+        }
+        return excludedDialogs;
+    }
+
+    public static boolean isDialogExcluded(long dialogId) {
+        return getExcludedDialogs().contains(dialogId);
+    }
+
+    public static void setDialogExcluded(long dialogId, boolean excluded) {
+        HashSet<Long> set = new HashSet<>(getExcludedDialogs());
+        boolean changed;
+        if (excluded) {
+            changed = set.add(dialogId);
+        } else {
+            changed = set.remove(dialogId);
+        }
+        if (changed) {
+            Long[] arr = set.toArray(new Long[0]);
+            String str = new Gson().toJson(arr);
+            NaConfig.INSTANCE.getRegexFiltersExcludedDialogs().setConfigString(str);
+            synchronized (cacheLock) {
+                excludedDialogs = set;
+            }
+            filteredCache.remove(dialogId);
+        }
+    }
+
+    public static void clearAllFilters() {
+        NaConfig.INSTANCE.getRegexFiltersData().setConfigString("[]");
+        NaConfig.INSTANCE.getRegexChatFiltersData().setConfigString("[]");
+        NaConfig.INSTANCE.getRegexFiltersExcludedDialogs().setConfigString("[]");
+        rebuildCache();
+    }
+
+    private static HashSet<Long> getBlockedChannels() {
+        if (blockedChannels == null) {
+            synchronized (cacheLock) {
+                if (blockedChannels == null) {
+                    try {
+                        String str = NaConfig.INSTANCE.getBlockedChannelsData().String();
+                        Long[] arr = new Gson().fromJson(str, Long[].class);
+                        blockedChannels = new HashSet<>();
+                        if (arr != null) {
+                            blockedChannels.addAll(Arrays.asList(arr));
+                        }
+                    } catch (Exception e) {
+                        blockedChannels = new HashSet<>();
+                    }
+                }
+            }
+        }
+        return blockedChannels;
+    }
+
+    public static boolean isBlockedChannel(long dialogId) {
+        return NekoConfig.ignoreBlocked.Bool() && getBlockedChannels().contains(dialogId);
+    }
+
+    public static void blockPeer(long dialogId) {
+        HashSet<Long> set = new HashSet<>(getBlockedChannels());
+        if (set.add(dialogId)) {
+            Long[] arr = set.toArray(new Long[0]);
+            String str = new Gson().toJson(arr);
+            NaConfig.INSTANCE.getBlockedChannelsData().setConfigString(str);
+            synchronized (cacheLock) {
+                blockedChannels = set;
+            }
+        }
+    }
+
+    public static void unblockPeer(long dialogId) {
+        HashSet<Long> set = new HashSet<>(getBlockedChannels());
+        if (set.remove(dialogId)) {
+            Long[] arr = set.toArray(new Long[0]);
+            String str = new Gson().toJson(arr);
+            NaConfig.INSTANCE.getBlockedChannelsData().setConfigString(str);
+            synchronized (cacheLock) {
+                blockedChannels = set;
+            }
+        }
+    }
+
+    public static ArrayList<Long> getBlockedChannelsList() {
+        return checkBlockedChannels(getBlockedChannels());
+    }
+
+    public static int getBlockedChannelsCount() {
+        return getBlockedChannels().size();
+    }
+
+    public static void clearBlockedChannels() {
+        NaConfig.INSTANCE.getBlockedChannelsData().setConfigString("[]");
+        synchronized (cacheLock) {
+            blockedChannels = new HashSet<>();
+        }
+    }
+
+    public static ArrayList<Long> checkBlockedChannels(HashSet<Long> blockedChannels) {
+        if (blockedChannels == null || blockedChannels.isEmpty()) return new ArrayList<>();
+        ArrayList<Long> filtered = new ArrayList<>();
+        try {
+            final MessagesController mc = MessagesController.getInstance(UserConfig.selectedAccount);
+            final MessagesStorage ms = MessagesStorage.getInstance(UserConfig.selectedAccount);
+            for (Long did : blockedChannels) {
+                if (did == null) continue;
+                if (did < 0) {
+                    TLRPC.Chat chat = mc.getChat(-did);
+                    if (chat == null) {
+                        chat = ms.getChatSync(-did);
+                    }
+                    if (chat != null) {
+                        filtered.add(did);
+                        mc.putChat(chat, true);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
+        return filtered;
+    }
+
+    public static void onMessageEdited(int msgId, long dialogId) {
+        var dialogCache = filteredCache.get(dialogId);
+        if (dialogCache != null) {
+            synchronized (dialogCache) {
+                dialogCache.remove(msgId);
+            }
+        }
     }
 
     public static class FilterModel {
@@ -275,5 +504,12 @@ public class AyuFilter {
                 disabledGroups.add(id);
             }
         }
+    }
+
+    public static class ChatFilterEntry {
+        @Expose
+        public long dialogId;
+        @Expose
+        public ArrayList<FilterModel> filters;
     }
 }

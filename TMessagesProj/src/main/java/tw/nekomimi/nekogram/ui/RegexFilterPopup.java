@@ -1,12 +1,3 @@
-/*
- * This is the source code of AyuGram for Android.
- *
- * We do not and cannot prevent the use of our code,
- * but be respectful and credit the original author.
- *
- * Copyright @Radolyn, 2023
- */
-
 package tw.nekomimi.nekogram.ui;
 
 import static org.telegram.messenger.LocaleController.getString;
@@ -54,8 +45,6 @@ public class RegexFilterPopup {
             y += view.getY();
             view = (View) view.getParent();
         }
-        x -= windowLayout.getMeasuredWidth() / 2f;
-        y -= windowLayout.getMeasuredHeight() / 2f;
         popupWindow.showAtLocation(fragment.getFragmentView(), 0, (int) x, (int) y);
         popupWindow.dimBehind();
     }

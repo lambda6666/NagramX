@@ -43,6 +43,8 @@
     <string name="DeleteCloudBackupFailed">Nie udało się wyczyścić danych w chmurze</string>
     <string name="DeleteCloudBackupSuccess">Dane w chmurze zostały usunięte</string>
     <string name="CloudConfigNoBackupToDelete">Brak danych do wyczyszczenia</string>
+    <string name="ClearRegexFilters">Wyczyść</string>
+    <string name="ClearRegexFiltersAlertMessage">Czy na pewno chcesz wyczyścić wszystkie zapisane filtry wyrażeń regularnych? Spowoduje to usunięcie zarówno filtrów współdzielonych, jak i filtrów dotyczących czatów.</string>
     <string name="PreferredTranslateTargetLang">Niestandardowa lista preferowanych języków</string>
     <string name="PreferredTranslateTargetLangExample">np. ja, zh_cn, zh_tw</string>
     <string name="PreferredTranslateTargetLangName">Preferowane języki</string>
@@ -50,11 +52,16 @@
     <string name="ClearDeletedAlertMessage">Czy na pewno chcesz wyczyścić wszystkie usunięte wiadomości w tym czacie?</string>
     <string name="ForwardsRestrictedInfoAyuDeleted">Przekierowywanie nie jest dozwolone.</string>
     <string name="RegexFiltersNotice">Kliknij, aby edytować.</string>
+    <string name="RegexFiltersImport">Importuj</string>
+    <string name="RegexFiltersExport">Eksportuj</string>
+    <string name="RegexFiltersImportSuccess">Filtry zaimportowane.</string>
+    <string name="RegexFiltersImportError">Nie udało się zaimportować filtrów ze schowka.</string>
+    <string name="RegexFiltersExportError">Nie udało się wyeksportować filtrów.</string>
     <string name="botCommandConfirmTitle">Wyślij polecenie</string>
     <string name="botCommandConfirmText">Czy chcesz wysłać to polecenie?\n\n%s</string>
     <string name="DisableScreenshotDetection">Wyłącz wykrywanie zrzutów ekranu</string>
     <string name="MessageSavingSaveMedia">Zapisz multimedia</string>
-    <string name="MessageSavingSaveMediaHint">Kliknij, aby uzyskać więcej</string>
+    <string name="MessageSavingSaveMediaHint">Kliknij, aby uzyskać więcej.</string>
     <string name="MessageSavingSaveMediaInPrivateChats">… w prywatnych czatach</string>
     <string name="MessageSavingSaveMediaInPublicChannels">… w kanałach publicznych</string>
     <string name="MessageSavingSaveMediaInPrivateChannels">… w kanałach prywatnych</string>
@@ -110,8 +117,8 @@
     <string name="TgBrowserOpenFail">Przeglądarka w aplikacji jest niedostępna</string>
     <string name="TgBrowserOpenFail_Desc">Wybrana operacja jest niedostępna, ponieważ przeglądarka w aplikacji została wyłączona.</string>
     <string name="MapPreviewProviderYandexNax">Yandex</string>
-    <string name="GhostMode">Tryb Ducha</string>
-    <string name="GhostEssentialsHeader">Niezbędne informacje o trybie duch</string>
+    <string name="GhostMode">Ustawienia trybu Ducha 👻</string>
+    <string name="GhostEssentialsHeader">Niezbędne informacje o trybie ducha</string>
     <string name="EnableGhostMode">Włącz tryb ducha</string>
     <string name="DisableGhostMode">Wyłącz tryb ducha</string>
     <string name="GhostModeEnabled">Włączono tryb ducha</string>
@@ -122,8 +129,8 @@
     <string name="DontSendOnlinePackets">Nie wysyłaj online</string>
     <string name="DontSendUploadProgress">Nie wysyłaj pisania</string>
     <string name="SendOfflinePacketAfterOnline">Automatyczne przejście w tryb offline</string>
-    <string name="MarkReadAfterSend">Czytaj dalej Interakcja</string>
-    <string name="GhostModeNotice">Długie dotknięcie dowolnej opcji zapobiega jej zmianie podczas przełączania Trybu ducha.</string>
+    <string name="MarkReadAfterSend">Czytaj dalej Interakcje</string>
+    <string name="GhostModeNotice">Długie dotknięcie dowolnej opcji zapobiega jej zmianie podczas przełączania trybu ducha.</string>
     <string name="MarkReadAfterSendNotice">Automatycznie odczytuje wiadomość, gdy wysyłasz nową lub klikasz reakcję.</string>
     <string name="SendWithoutSoundRowNotice">Automatyczne wysyłanie wiadomości bez dźwięku.</string>
     <string name="GhostReadMessage">Czytaj wiadomość w trybie duch</string>
@@ -243,4 +250,16 @@
     <string name="ExportSettingsIncludeApiKeys">Dołącz klucze API</string>
     <string name="DisableInAppBrowserGestures">Wyłącz gesty</string>
     <string name="HowToObtain">Jak zdobyć?</string>
+    <string name="BlockChannel">Zablokuj kanał</string>
+    <string name="UnblockChannel">Odblokuj kanał</string>
+    <string name="BlockedChannels">Zablokowane kanały</string>
+    <string name="BlockedChannelsCount_one">%1$d zablokowany kanał</string>
+    <string name="BlockedChannelsCount_other">%1$d zablokowane kanały</string>
+    <string name="BlockedChannelsInfo">Możesz ukryć wiadomości z zablokowanych kanałów w grupach. %s</string>
+    <string name="ChannelBlocked">Kanał zablokowany.</string>
+    <string name="ChannelUnblocked">Kanał odblokowany.</string>
+    <string name="BlockedChannelsEmpty">Jeszcze nie zablokowano żadnych kanałów</string>
+    <string name="UnblockAllChannelsWarn">Czy na pewno chcesz odblokować **wszystkie kanały**?</string>
+    <string name="BlockChannelsUnavailable">Niektóre kanały są tymczasowo niedostępne.</string>
+    <string name="FixLinkPreview">Napraw podgląd łącza</string>
 </resources>

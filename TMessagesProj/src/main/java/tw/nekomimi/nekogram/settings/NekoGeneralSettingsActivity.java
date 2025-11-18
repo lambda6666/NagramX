@@ -280,12 +280,16 @@ public class NekoGeneralSettingsActivity extends BaseNekoXSettingsActivity {
             (input) -> input.matches("^[A-za-z0-9.]{1,255}$") || input.isEmpty() ? input : (String) NekoConfig.customSavePath.defaultValue));
     private final AbstractConfigCell customTitleUserNameRow = cellGroup.appendCell(new ConfigCellTextCheck(NaConfig.INSTANCE.getCustomTitleUserName()));
     private final AbstractConfigCell folderNameAsTitleRow = cellGroup.appendCell(new ConfigCellTextCheck(NaConfig.INSTANCE.getFolderNameAsTitle()));
-    private final AbstractConfigCell showIdAndDcRow = cellGroup.appendCell(new ConfigCellTextCheck(NekoConfig.showIdAndDc));
     private final AbstractConfigCell preferCommonGroupsTabRow = cellGroup.appendCell(new ConfigCellTextCheck(NaConfig.INSTANCE.getPreferCommonGroupsTab(), getString(R.string.PreferCommonGroupsTabNotice)));
     private final AbstractConfigCell autoPauseVideoRow = cellGroup.appendCell(new ConfigCellTextCheck(NekoConfig.autoPauseVideo, getString(R.string.AutoPauseVideoAbout)));
     private final AbstractConfigCell disableNumberRoundingRow = cellGroup.appendCell(new ConfigCellTextCheck(NekoConfig.disableNumberRounding, "4.8K -> 4777"));
     private final AbstractConfigCell usePersianCalendarRow = cellGroup.appendCell(new ConfigCellTextCheck(NekoConfig.usePersianCalendar, getString(R.string.UsePersianCalendarInfo)));
     private final AbstractConfigCell displayPersianCalendarByLatinRow = cellGroup.appendCell(new ConfigCellTextCheck(NekoConfig.displayPersianCalendarByLatin));
+    private final AbstractConfigCell showIdAndDcRow = cellGroup.appendCell(new ConfigCellSelectBox("ShowIdAndDc", NaConfig.INSTANCE.getIdDcType(), new String[]{
+            getString(R.string.Disable),
+            "Telegram API",
+            "Bot API"
+    }, null));
     private final AbstractConfigCell nameOrderRow = cellGroup.appendCell(new ConfigCellSelectBox(null, NekoConfig.nameOrder, new String[]{
             getString(R.string.LastFirst),
             getString(R.string.FirstLast)
@@ -318,9 +322,6 @@ public class NekoGeneralSettingsActivity extends BaseNekoXSettingsActivity {
         if (!shouldShowPersian()) {
             cellGroup.rows.remove(usePersianCalendarRow);
             cellGroup.rows.remove(displayPersianCalendarByLatinRow);
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
-            cellGroup.rows.remove(pushServiceTypeInAppDialogRow);
         }
         wasCentered = isCentered();
         wasCenteredAtBeginning = wasCentered;
@@ -467,10 +468,8 @@ public class NekoGeneralSettingsActivity extends BaseNekoXSettingsActivity {
             } else if (key.equals(NaConfig.INSTANCE.getPushServiceType().getKey())) {
                 if ((int) newValue == 0) {
                     AndroidUtil.setPushService(false);
-                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
-                        ((ConfigCellTextCheck) pushServiceTypeInAppDialogRow).setEnabledAndUpdateState(true);
-                        ApplicationLoader.startPushService();
-                    }
+                    ((ConfigCellTextCheck) pushServiceTypeInAppDialogRow).setEnabledAndUpdateState(true);
+                    ApplicationLoader.startPushService();
                 } else {
                     NaConfig.INSTANCE.getPushServiceTypeInAppDialog().setConfigBool(false);
                     ((ConfigCellTextCheck) pushServiceTypeInAppDialogRow).setEnabledAndUpdateState(false);

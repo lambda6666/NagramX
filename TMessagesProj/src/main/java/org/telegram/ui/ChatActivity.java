@@ -317,6 +317,7 @@ import java.util.Stack;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -4688,7 +4689,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
             if (NaConfig.INSTANCE.getChatMenuItemToBeginning().Bool()) headerItem.lazilyAddSubItem(to_the_beginning, R.drawable.ic_upward, getString(R.string.ToTheBeginning));
             if (NaConfig.INSTANCE.getChatMenuItemGoToMessage().Bool()) headerItem.lazilyAddSubItem(to_the_message, R.drawable.msg_go_up, getString(R.string.ToTheMessage));
             hideTitleItem = NaConfig.INSTANCE.getChatMenuItemHideTitle().Bool() ? headerItem.lazilyAddSubItem(nkheaderbtn_hide_title, R.drawable.hide_title, getString(R.string.HideTitle)) : null;
-            if (NaConfig.INSTANCE.getChatMenuItemClearDeleted().Bool()) headerItem.lazilyAddSubItem(nkbtn_clearDeleted, R.drawable.msg_clear, getString(R.string.ClearDeleted));
+            if (NaConfig.INSTANCE.getChatMenuItemClearDeleted().Bool() && NaConfig.INSTANCE.getEnableSaveDeletedMessages().Bool()) headerItem.lazilyAddSubItem(nkbtn_clearDeleted, R.drawable.msg_clear, getString(R.string.ClearDeleted));
             if (!isTopic) {
                 if (NaConfig.INSTANCE.getChatMenuItemDeleteOwnMessages().Bool() && (ChatObject.isMegagroup(currentChat) || currentChat != null && !ChatObject.isChannel(currentChat))) {
                     headerItem.lazilyAddSubItem(nkheaderbtn_zibi, R.drawable.msg_delete, LocaleController.getString(R.string.DeleteAllFromSelf));
@@ -15122,14 +15123,16 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
             }
 
             final TL_account.getWebPagePreview req = new TL_account.getWebPagePreview();
+            if (textToCheck instanceof String) {
+                req.message = (String) textToCheck;
+            } else {
+                req.message = textToCheck.toString();
+            }
             // na: page preview rules
-            try {
-                req.message = PagePreviewRulesHelper.getInstance().doRegex(textToCheck);
-            } catch (Exception ignored) {
-                if (textToCheck instanceof String) {
-                    req.message = (String) textToCheck;
-                } else {
-                    req.message = textToCheck.toString();
+            if (NaConfig.INSTANCE.getFixLinkPreview().Bool()) {
+                try {
+                    req.message = PagePreviewRulesHelper.getInstance().doRegex(textToCheck);
+                } catch (Exception ignored) {
                 }
             }
             if (foundWebPage != null && req.message.equals(foundWebPage.displayedText)) {
@@ -21883,10 +21886,8 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
 
             // --- AyuGram history hook start
             if (NaConfig.INSTANCE.getEnableSaveDeletedMessages().Bool()) {
-                final String NAX = "AyuHistoryHookMain";
-
-                var dialogId = getDialogId();
-                var topicId = getTopicId();
+                long dialogId = getDialogId();
+                long topicId = getTopicId();
 
                 boolean isReplyChatComment = isReplyChatComment();
                 boolean isThreadChat = isThreadChat();
@@ -21899,25 +21900,17 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                 // ...deleted messages
                 long endId = minVal; // bottom message
 
-                var limit = 500;
-
-                var msgIds = AyuHistoryHook.getMinAndMaxIds(messArr);
-
-                if (BuildVars.LOGS_ENABLED) Log.d(NAX, "messages.size: " + messages.size());
-                if (BuildVars.LOGS_ENABLED) Log.d(NAX, "messArr.size: " + messArr.size());
+                Pair<Integer, Integer> msgIds = AyuHistoryHook.getMinAndMaxIds(messArr);
 
                 if (!DialogObject.isEncryptedDialog(dialogId)) {
                     if (!messArr.isEmpty()) {
                         int msg1 = msgIds.first; // smaller
                         int msg2 = msgIds.second; // bigger
-                        if (BuildVars.LOGS_ENABLED) Log.d(NAX, "msgIds.first: "+ msgIds.first + ", " + "msgIds.second: " + msgIds.second);
 
                         startId = Math.min(msg1, msg2);
                         endId = Math.max(msg1, msg2);
-                        if (BuildVars.LOGS_ENABLED) Log.d(NAX, "startId: " + startId + ", " + "endId: " + endId);
 
-                        var dialog = getMessagesController().getDialog(dialogId);
-                        if (BuildVars.LOGS_ENABLED) Log.d(NAX, "dialog: " + dialog);
+                        TLRPC.Dialog dialog = getMessagesController().getDialog(dialogId);
 
                         TLRPC.TL_forumTopic topic = null;
                         if (isTopic) {
@@ -21929,66 +21922,37 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                             }
                         }
 
-                        // todo: check if these's any messages between current loaded and newly loaded
-                        // like, we know their ids, so why not
-                        var minMaxRes = getMessagesStorage().getMinAndMaxForDialog(dialogId);
-                        if (BuildVars.LOGS_ENABLED) Log.d(NAX, "minMaxRes.first: " + minMaxRes.first);
-                        if (BuildVars.LOGS_ENABLED) Log.d(NAX, "minMaxRes.second: " + minMaxRes.second);
-                        if (BuildVars.LOGS_ENABLED && dialog != null) Log.d(NAX, "dialog.top_message: " + dialog.top_message);
-
-                        // empty user dialog, so load as much as we can
-                        if (dialog != null && DialogObject.isUserDialog(dialogId) && (startId == endId && endId == dialog.top_message) && messArr.size() <= 1) {
-                            if (BuildVars.LOGS_ENABLED) Log.d(NAX, "case a1");
+                        Pair<Integer, Integer> minMaxRes = getMessagesStorage().getMinAndMaxForDialog(dialogId);
+                        if (dialog != null && DialogObject.isUserDialog(dialogId) && (startId == endId && endId == dialog.top_message) && messArr.size() <= 1) { // empty user dialog, so load as much as we can
                             startId = minVal;
                             endId = maxVal;
-                        }
-                        // deleted messages loading in comments
-                        else if (isChannelComment) {
-                            if (BuildVars.LOGS_ENABLED) Log.d(NAX, "case a2");
+                        } else if (isChannelComment) { // deleted messages loading in comments
                             startId = threadMaxOutboxReadId == 0 ? minVal : threadMessageId;
                             endId = threadMaxOutboxReadId == 0 ? minVal : threadMaxOutboxReadId;
-                        }
-                        // allows loading messages that are under bottom messages
-                        else if (dialog != null && (dialog.top_message == endId || (minMaxRes.second == endId && dialog.top_message <= minMaxRes.second)) || topic != null && topic.top_message == endId) {
-                            if (BuildVars.LOGS_ENABLED) Log.d(NAX, "case a3");
-                            // startId is the smallest in the current batch
-                            endId = maxVal;
-                        }
-                        // TL_messageService
-                        else if (messArr.size() == 1 && messArr.get(0).messageOwner instanceof TLRPC.TL_messageService) {
-                            if (BuildVars.LOGS_ENABLED) Log.d(NAX, "case a4");
+                        } else if (dialog != null && (dialog.top_message == endId || (minMaxRes.second == endId && dialog.top_message <= minMaxRes.second)) || topic != null && topic.top_message == endId) { // allows loading messages that are under bottom messages
+                            endId = maxVal; // startId is the smallest in the current batch
+                        } else if (messArr.size() == 1 && messArr.get(0).messageOwner instanceof TLRPC.TL_messageService) { // TL_messageService
                             startId = minVal;
                             endId = AyuUtils.getMinRealId(messages);
-                        }
-                        // allows loading messages that are uppermore than the dialog
-                        else if (messArr.size() < count && !isCache && (load_type == 2 || load_type == 1) && !messArr.isEmpty()) {
-                            if (BuildVars.LOGS_ENABLED) Log.d(NAX, "case a5");
+                        } else if (messArr.size() < count && !isCache && (load_type == 2 || load_type == 1) && !messArr.isEmpty()) { // allows loading messages that are uppermore than the dialog
                             startId = minVal;
                             endId = Math.min(msg1, msg2);
                         }
                     } else {
-                        if (BuildVars.LOGS_ENABLED) Log.d(NAX, "messArr isEmpty");
-                        if (!messages.isEmpty() && load_type != 1) { // for loading uppermore // NagramX: load_type != 1
-                            if (BuildVars.LOGS_ENABLED) Log.d(NAX, "case b1");
+                        if (!messages.isEmpty() && load_type != 1) { // for loading uppermore
                             startId = minVal;
                             endId = AyuUtils.getMinRealId(messages);
-                        }
-                        // empty(new) user dialog, so load as much as we can
-                        else if (DialogObject.isUserDialog(dialogId)) {
-                            if (BuildVars.LOGS_ENABLED) Log.d(NAX, "case b2");
+                        } else if (DialogObject.isUserDialog(dialogId)) { // empty(new) user dialog, so load as much as we can
                             startId = minVal;
                             endId = maxVal;
                         }
                         if (isCache) {
-                            if (BuildVars.LOGS_ENABLED) Log.d(NAX, "case b3");
                             startId = minVal;
                             endId = minVal;
                         }
                     }
-                } else {
-                    if (BuildVars.LOGS_ENABLED) Log.d(NAX, "isEncryptedDialog");
-                    // works for secret chats only, because they're all cached
-                    var secretRes = getMessagesStorage().getMinAndMaxForDialog(dialogId);
+                } else { // works for secret chats only, because they're all cached
+                    Pair<Integer, Integer> secretRes = getMessagesStorage().getMinAndMaxForDialog(dialogId);
                     int secretStartId = secretRes.second; // bigger
                     int secretEndId = secretRes.first; // smaller
 
@@ -21996,61 +21960,34 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                     int msg2 = msgIds.first; // smaller
 
                     if (Math.abs(secretStartId - secretEndId) == 1 || (secretStartId == msg1 && secretEndId == msg2)) { // empty dialog, so load as much as we can
-                        if (BuildVars.LOGS_ENABLED) Log.d(NAX, "case c1");
                         startId = minVal;
                         endId = maxVal;
                     } else if (secretStartId == msg1) { // loaded up to top
-                        if (BuildVars.LOGS_ENABLED) Log.d(NAX, "case c2");
                         startId = minVal;
                         endId = msg2;
                     } else if (secretEndId == msg2) { // loaded up to bottom
-                        if (BuildVars.LOGS_ENABLED) Log.d(NAX, "case c3");
                         startId = msg1;
                         endId = maxVal;
                     } else { // just between some messages
-                        if (BuildVars.LOGS_ENABLED) Log.d(NAX, "case c4");
                         startId = msg1;
                         endId = msg2;
                     }
-                    if (BuildVars.LOGS_ENABLED) Log.d(NAX, "secretStartId: " + secretStartId + ", secretEndId: " + secretEndId);
-                    if (BuildVars.LOGS_ENABLED) Log.d(NAX, "msg1: " + msg1 + ", msg2: " + msg2);
                 }
 
                 if (startId > endId) {
-                    var t = startId;
+                    long t = startId;
                     startId = endId;
                     endId = t;
-                    if (BuildVars.LOGS_ENABLED) Log.d(NAX, "if (startId > endId) -> " + "startId: " + startId + ", " + "endId: " + endId);
                 }
 
-                if (BuildVars.LOGS_ENABLED) Log.d(NAX,
-                        "messArr: " + messArr.size()
-                                + " , startId: " + startId
-                                + " , endId: " + endId
-                                + " , count: " + count
-                                + " , load_type: " + load_type
-                                + " , isCache: " + isCache
-                                + " , isEnd: " + isEnd
-                                + " , endReached[0]: " + endReached[0]
-                                + " , threadMaxInboxReadId: " + threadMaxInboxReadId
-                                + " , threadMaxOutboxReadId: " + threadMaxOutboxReadId
-                                + " , replyMaxReadId: " + replyMaxReadId
-                                + " , threadMessageId: " + threadMessageId
-                                + " , replyOriginalMessageId: " + replyOriginalMessageId
-                                + " , isComments: " + isComments
-                                + " , isReplyChatComment: " + isReplyChatComment
-                                + " , isThreadChat: " + isThreadChat
-                                + " , isTopic: " + isTopic
-                );
                 if (!isChannelComment && !isInScheduleMode() && chatMode != MODE_PINNED && (startId != minVal || endId != minVal)) {
-                    var needToReset = messArr.size() == count;
-                    AyuHistoryHook.doHook(currentAccount, messArr, messagesDict, startId, endId, dialogId, limit, topicId, isSecretChat(), load_type, isChannelComment, threadMessageId, isTopic);
+                    boolean needToReset = messArr.size() == count;
+                    int limit = 200;
+                    AyuHistoryHook.doHookAsync(currentAccount, startId, endId, dialogId, limit, topicId, load_type, isChannelComment, threadMessageId, isTopic);
                     if (needToReset) {
-                        if (BuildVars.LOGS_ENABLED) Log.d(NAX, "if (needToReset) -> " + "count = messArr.size(): " + count);
                         count = messArr.size();
                     }
                 }
-                if (BuildVars.LOGS_ENABLED) Log.d(NAX, "history hook end");
             }
             // --- AyuGram history hook end
 
@@ -24374,9 +24311,11 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
             if (did == dialog_id) {
                 ArrayList<MessageObject> loadedMessages = (ArrayList<MessageObject>) args[1];
                 LongSparseArray<SparseArray<ArrayList<MessageObject>>> replyMessageOwners = (LongSparseArray<SparseArray<ArrayList<MessageObject>>>) args[2];
+                SparseArray<MessageObject> loadedMessagesMap = new SparseArray<>(); // AyuHistoryHook
                 for (int a = 0, N = loadedMessages.size(); a < N; a++) {
                     MessageObject obj = loadedMessages.get(a);
                     repliesMessagesDict.put(obj.getId(), obj);
+                    loadedMessagesMap.put(obj.getId(), obj);
                 }
                 if (replyMessageOwners != null) {
                     for (int a = 0, N = replyMessageOwners.size(); a < N; a++) {
@@ -24386,6 +24325,18 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                             for (int b = 0, N2 = arrayList.size(); b < N2; b++) {
                                 addReplyMessageOwner(arrayList.get(b), 0);
                             }
+                        }
+                    }
+                }
+                // AyuHistoryHook: fix replyMessage
+                for (int a = 0, N = messages.size(); a < N; a++) {
+                    MessageObject messageObject = messages.get(a);
+                    if (messageObject.getReplyMsgId() != 0 && (messageObject.replyMessageObject == null || messageObject.replyMessageObject.messageOwner instanceof TLRPC.TL_messageEmpty)) {
+                        int replyId = messageObject.getReplyMsgId();
+                        MessageObject replyMessage = loadedMessagesMap.get(replyId);
+                        if (replyMessage != null) {
+                            messageObject.replyMessageObject = replyMessage;
+                            addReplyMessageOwner(messageObject, 0);
                         }
                     }
                 }
@@ -26149,7 +26100,6 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
         boolean updateChat = false;
         boolean hasFromMe = false;
         boolean isAd = false;
-        int blockedCount = 0;
 
         if (chatListItemAnimator != null) {
             chatListItemAnimator.setShouldAnimateEnterFromBottom(animatedFromBottom);
@@ -26412,15 +26362,11 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                 }
 
                 if (threadMessageId == 0 || isTopic) {
-                    if (obj.messageOwner.mentioned && obj.isContentUnread()) {
+                    if (obj.messageOwner.mentioned && obj.isContentUnread() && !obj.messageOwner.ayuDeleted) {
                         newMentionsCount++;
                     }
                 }
-                if (!isAd) {
-                    if (NekoConfig.ignoreBlocked.Bool() && getMessagesController().blockePeers.indexOfKey(obj.getFromChatId()) >= 0) {
-                        blockedCount++;
-                        continue;
-                    }
+                if (!isAd && !obj.messageOwner.ayuDeleted) {
                     newUnreadMessageCount++;
                 }
                 if (obj.type == 10 || obj.type == MessageObject.TYPE_ACTION_PHOTO) {
@@ -26572,14 +26518,14 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                 }
 
                 if (placeToPaste == -1) {
-                    if (!obj.scheduled && obj.messageOwner.id < 0 || obj.isQuickReply() || messages.isEmpty()) {
+                    if ((!obj.scheduled && obj.messageOwner.id < 0 && !obj.messageOwner.ayuDeleted) || obj.isQuickReply() || messages.isEmpty()) {
                         placeToPaste = 0;
                     } else {
                         final int size = messages.size();
                         for (int b = 0; b < size; b++) {
                             final MessageObject lastMessage = messages.get(b);
                             if (lastMessage.type >= 0 && lastMessage.messageOwner.date > 0) {
-                                if (chatMode != MODE_SCHEDULED && lastMessage.messageOwner.id > 0 && obj.messageOwner.id > 0 && lastMessage.messageOwner.id < obj.messageOwner.id || lastMessage.messageOwner.date < obj.messageOwner.date || lastMessage.messageOwner.date == obj.messageOwner.date) {
+                                if (chatMode != MODE_SCHEDULED && lastMessage.messageOwner.id > 0 && obj.messageOwner.id > 0 && lastMessage.messageOwner.id < obj.messageOwner.id || lastMessage.messageOwner.date < obj.messageOwner.date || lastMessage.messageOwner.date == obj.messageOwner.date && lastMessage.messageOwner.id > 0 && obj.messageOwner.id > 0 && lastMessage.messageOwner.id < obj.messageOwner.id) {
                                     MessageObject.GroupedMessages lastGroupedMessages;
                                     if (lastMessage.getGroupId() != 0) {
                                         lastGroupedMessages = groupedMessagesMap.get(lastMessage.getGroupId());
@@ -26770,15 +26716,11 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                     }
                 }
                 if (threadMessageId == 0 || isTopic) {
-                    if (!obj.isOut() && obj.messageOwner.mentioned && obj.isContentUnread()) {
+                    if (!obj.isOut() && obj.messageOwner.mentioned && obj.isContentUnread() && !obj.messageOwner.ayuDeleted) {
                         newMentionsCount++;
                     }
                 }
-                if (!isAd) {
-                    if (NekoConfig.ignoreBlocked.Bool() && getMessagesController().blockePeers.indexOfKey(obj.getFromChatId()) >= 0) {
-                        blockedCount++;
-                        continue;
-                    }
+                if (!isAd && !obj.messageOwner.ayuDeleted) {
                     newUnreadMessageCount++;
                 }
                 if (obj.type == 10 || obj.type == MessageObject.TYPE_ACTION_PHOTO) {
@@ -26845,17 +26787,8 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                                 pagedownButtonCounter.setCount(newUnreadMessageCount, true);
                             }
                         }
-                        if (arr.size() == blockedCount) {
-                            if (getMessagesController().isForum(dialog_id) || getMessagesController().isMonoForumWithManageRights(dialog_id)) {
-                                getMessagesController().markAllTopicsAsRead(dialog_id);
-                            }
-                            var dialog = getMessagesController().getDialog(dialog_id);
-                            getMessagesController().markMentionsAsRead(dialog_id, 0);
-                            getMessagesController().markDialogAsRead(dialog_id, dialog.top_message, dialog.top_message, dialog.last_message_date, false, 0, 0, true, 0);
-                        } else {
-                            canShowPagedownButton = true;
-                            updatePagedownButtonVisibility(true);
-                        }
+                        canShowPagedownButton = true;
+                        updatePagedownButtonVisibility(true);
                     }
                 } else {
                     MessageObject scrollToMessage = null;
@@ -28338,65 +28271,120 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
             menu.removeItem(android.R.id.shareText);
         }
         menu.clear();
-        int order = 0;
-        menu.add(android.R.id.cut, android.R.id.cut, order++, android.R.string.cut);
-        menu.add(android.R.id.copy, android.R.id.copy, order++, android.R.string.copy);
-        menu.add(android.R.id.paste, android.R.id.paste, order++, android.R.string.paste);
+        final AtomicInteger order = new AtomicInteger(0);
+        menu.add(android.R.id.cut, android.R.id.cut, order.getAndIncrement(), android.R.string.cut);
+        menu.add(android.R.id.copy, android.R.id.copy, order.getAndIncrement(), android.R.string.copy);
+        menu.add(android.R.id.paste, android.R.id.paste, order.getAndIncrement(), android.R.string.paste);
 
-        menu.add(R.id.menu_translate, R.id.menu_translate, order++, NaConfig.INSTANCE.isLLMTranslatorAvailable() ? getString(R.string.TranslateMessageLLM) : getString(R.string.TranslateMessage));
         SpannableStringBuilder stringBuilder;
-        if (NaConfig.INSTANCE.getShowTextBold().Bool()) {
-            stringBuilder = new SpannableStringBuilder(LocaleController.getString(R.string.Bold));
-            stringBuilder.setSpan(new TypefaceSpan(AndroidUtilities.bold()), 0, stringBuilder.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            menu.add(R.id.menu_groupbolditalic, R.id.menu_bold, order++, stringBuilder);
-        }
-        if (NaConfig.INSTANCE.getShowTextItalic().Bool()) {
-            stringBuilder = new SpannableStringBuilder(LocaleController.getString(R.string.Italic));
-            stringBuilder.setSpan(new TypefaceSpan(AndroidUtilities.getTypeface("fonts/ritalic.ttf")), 0, stringBuilder.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            menu.add(R.id.menu_groupbolditalic, R.id.menu_italic, order++, stringBuilder);
-        }
-        if (NaConfig.INSTANCE.getShowTextMono().Bool()) {
-            stringBuilder = new SpannableStringBuilder(LocaleController.getString(R.string.Mono));
-            stringBuilder.setSpan(new TypefaceSpan(Typeface.MONOSPACE), 0, stringBuilder.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            menu.add(R.id.menu_groupbolditalic, R.id.menu_mono, order++, stringBuilder);
-        }
-        if (NaConfig.INSTANCE.getShowTextMonoCode().Bool()) {
-            stringBuilder = new SpannableStringBuilder(LocaleController.getString(R.string.MonoCode));
-            stringBuilder.setSpan(new TypefaceSpan(Typeface.MONOSPACE), 0, stringBuilder.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            menu.add(R.id.menu_groupbolditalic, R.id.menu_code, order++, stringBuilder);
-        }
-        if (encryptedChat == null || AndroidUtilities.getPeerLayerVersion(encryptedChat.layer) >= 101) {
-            TextStyleSpan.TextStyleRun run;
-            if (NaConfig.INSTANCE.getShowTextStrikethrough().Bool()) {
-                stringBuilder = new SpannableStringBuilder(LocaleController.getString(R.string.Strike));
-                run = new TextStyleSpan.TextStyleRun();
-                run.flags |= TextStyleSpan.FLAG_STYLE_STRIKE;
-                stringBuilder.setSpan(new TextStyleSpan(run), 0, stringBuilder.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                menu.add(R.id.menu_groupbolditalic, R.id.menu_strike, order++, stringBuilder);
+        Map<String, java.lang.Runnable> addActions = new HashMap<>();
+        addActions.put("translate", () -> {
+            if (NaConfig.INSTANCE.getShowTextTranslate().Bool()) {
+                menu.add(R.id.menu_translate, R.id.menu_translate, order.getAndIncrement(), NaConfig.INSTANCE.isLLMTranslatorAvailable() ? getString(R.string.TranslateMessageLLM) : getString(R.string.TranslateMessage));
             }
-            if (NaConfig.INSTANCE.getShowTextUnderline().Bool()) {
-                stringBuilder = new SpannableStringBuilder(LocaleController.getString(R.string.Underline));
-                run = new TextStyleSpan.TextStyleRun();
-                run.flags |= TextStyleSpan.FLAG_STYLE_UNDERLINE;
-                stringBuilder.setSpan(new TextStyleSpan(run), 0, stringBuilder.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                menu.add(R.id.menu_groupbolditalic, R.id.menu_underline, order++, stringBuilder);
+        });
+        addActions.put("bold", () -> {
+            if (NaConfig.INSTANCE.getShowTextBold().Bool()) {
+                SpannableStringBuilder s = new SpannableStringBuilder(getString(R.string.Bold));
+                s.setSpan(new TypefaceSpan(AndroidUtilities.bold()), 0, s.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                menu.add(R.id.menu_groupbolditalic, R.id.menu_bold, order.getAndIncrement(), s);
             }
-        }
-        // NekoX: Move Spoiler back
-        if (chat && NaConfig.INSTANCE.getShowTextQuote().Bool()) {
-            menu.add(R.id.menu_groupbolditalic, R.id.menu_quote, order++, LocaleController.getString(R.string.Quote));
-        }
-        if (NaConfig.INSTANCE.getShowTextSpoiler().Bool()) {
-            menu.add(R.id.menu_groupbolditalic, R.id.menu_spoiler, order++, LocaleController.getString(R.string.Spoiler));
-        }
-        if (NaConfig.INSTANCE.getShowTextCreateLink().Bool()) {
-            menu.add(R.id.menu_groupbolditalic, R.id.menu_link, order++, LocaleController.getString(R.string.CreateLink));
-        }
-        if (NaConfig.INSTANCE.getShowTextCreateMention().Bool()) {
-            menu.add(R.id.menu_groupbolditalic, R.id.menu_mention, order++, LocaleController.getString(R.string.CreateMention));
-        }
-        if (NaConfig.INSTANCE.getShowTextRegular().Bool()) {
-            menu.add(R.id.menu_groupbolditalic, R.id.menu_regular, order++, LocaleController.getString(R.string.Regular));
+        });
+        addActions.put("italic", () -> {
+            if (NaConfig.INSTANCE.getShowTextItalic().Bool()) {
+                SpannableStringBuilder s = new SpannableStringBuilder(getString(R.string.Italic));
+                s.setSpan(new TypefaceSpan(AndroidUtilities.getTypeface("fonts/ritalic.ttf")), 0, s.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                menu.add(R.id.menu_groupbolditalic, R.id.menu_italic, order.getAndIncrement(), s);
+            }
+        });
+        addActions.put("mono", () -> {
+            if (NaConfig.INSTANCE.getShowTextMono().Bool()) {
+                SpannableStringBuilder s = new SpannableStringBuilder(LocaleController.getString(R.string.Mono));
+                s.setSpan(new TypefaceSpan(Typeface.MONOSPACE), 0, s.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                menu.add(R.id.menu_groupbolditalic, R.id.menu_mono, order.getAndIncrement(), s);
+            }
+        });
+        addActions.put("code", () -> {
+            if (NaConfig.INSTANCE.getShowTextMonoCode().Bool()) {
+                SpannableStringBuilder s = new SpannableStringBuilder(getString(R.string.MonoCode));
+                s.setSpan(new TypefaceSpan(Typeface.MONOSPACE), 0, s.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                menu.add(R.id.menu_groupbolditalic, R.id.menu_code, order.getAndIncrement(), s);
+            }
+        });
+        addActions.put("strike", () -> {
+            if (encryptedChat == null || AndroidUtilities.getPeerLayerVersion(encryptedChat.layer) >= 101) {
+                if (NaConfig.INSTANCE.getShowTextStrikethrough().Bool()) {
+                    SpannableStringBuilder s = new SpannableStringBuilder(getString(R.string.Strike));
+                    TextStyleSpan.TextStyleRun r = new TextStyleSpan.TextStyleRun();
+                    r.flags |= TextStyleSpan.FLAG_STYLE_STRIKE;
+                    s.setSpan(new TextStyleSpan(r), 0, s.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    menu.add(R.id.menu_groupbolditalic, R.id.menu_strike, order.getAndIncrement(), s);
+                }
+            }
+        });
+        addActions.put("underline", () -> {
+            if (encryptedChat == null || AndroidUtilities.getPeerLayerVersion(encryptedChat.layer) >= 101) {
+                if (NaConfig.INSTANCE.getShowTextUnderline().Bool()) {
+                    SpannableStringBuilder s = new SpannableStringBuilder(getString(R.string.Underline));
+                    TextStyleSpan.TextStyleRun r = new TextStyleSpan.TextStyleRun();
+                    r.flags |= TextStyleSpan.FLAG_STYLE_UNDERLINE;
+                    s.setSpan(new TextStyleSpan(r), 0, s.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    menu.add(R.id.menu_groupbolditalic, R.id.menu_underline, order.getAndIncrement(), s);
+                }
+            }
+        });
+        addActions.put("quote", () -> {
+            if (chat && NaConfig.INSTANCE.getShowTextQuote().Bool()) {
+                menu.add(R.id.menu_groupbolditalic, R.id.menu_quote, order.getAndIncrement(), getString(R.string.Quote));
+            }
+        });
+        addActions.put("spoiler", () -> {
+            if (NaConfig.INSTANCE.getShowTextSpoiler().Bool()) {
+                menu.add(R.id.menu_groupbolditalic, R.id.menu_spoiler, order.getAndIncrement(), getString(R.string.Spoiler));
+            }
+        });
+        addActions.put("link", () -> {
+            if (NaConfig.INSTANCE.getShowTextCreateLink().Bool()) {
+                menu.add(R.id.menu_groupbolditalic, R.id.menu_link, order.getAndIncrement(), getString(R.string.CreateLink));
+            }
+        });
+        addActions.put("mention", () -> {
+            if (NaConfig.INSTANCE.getShowTextCreateMention().Bool()) {
+                menu.add(R.id.menu_groupbolditalic, R.id.menu_mention, order.getAndIncrement(), getString(R.string.CreateMention));
+            }
+        });
+        addActions.put("regular", () -> {
+            if (NaConfig.INSTANCE.getShowTextRegular().Bool()) {
+                menu.add(R.id.menu_groupbolditalic, R.id.menu_regular, order.getAndIncrement(), getString(R.string.Regular));
+            }
+        });
+        // Apply in saved order
+        String orderStr = NaConfig.INSTANCE.getTextStyleOrder().String();
+        if (!TextUtils.isEmpty(orderStr)) {
+            String[] keys = orderStr.split(",");
+            for (String k : keys) {
+                Runnable r = addActions.get(k);
+                if (r != null) r.run();
+            }
+            for (String k : new String[]{"translate","bold","italic","mono","code","strike","underline","quote","spoiler","link","mention","regular"}){
+                if (!orderStr.contains(k)){
+                    Runnable r = addActions.get(k);
+                    if (r != null) r.run();
+                }
+            }
+        } else {
+            addActions.get("translate").run();
+            addActions.get("bold").run();
+            addActions.get("italic").run();
+            addActions.get("mono").run();
+            addActions.get("code").run();
+            addActions.get("strike").run();
+            addActions.get("underline").run();
+            addActions.get("quote").run();
+            addActions.get("spoiler").run();
+            addActions.get("link").run();
+            addActions.get("mention").run();
+            addActions.get("regular").run();
         }
     }
 
@@ -32310,7 +32298,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
             }
             final boolean showMessageSeen = !suggestEdit && !isReactionsViewAvailable && !isInScheduleMode() && currentChat != null && message.isOutOwner() && message.isSent() && !message.isEditing() && !message.isSending() && !message.isSendError() && !message.isContentUnread() && !message.isUnread() && (ConnectionsManager.getInstance(currentAccount).getCurrentTime() - message.messageOwner.date < getMessagesController().chatReadMarkExpirePeriod) && (ChatObject.isMegagroup(currentChat) || !ChatObject.isChannel(currentChat)) && chatInfo != null && chatInfo.participants_count <= getMessagesController().chatReadMarkSizeThreshold && !(message.messageOwner.action instanceof TLRPC.TL_messageActionChatJoinedByRequest) && chatMode != MODE_SAVED && message.canSetReaction() && !ChatObject.isMonoForum(currentChat);
             final boolean showMessageAuthor = !suggestEdit && currentChat != null && !message.isOut() && ChatObject.isMonoForum(currentChat) && ChatObject.canManageMonoForum(currentAccount, currentChat) && -currentChat.linked_monoforum_id == message.getFromChatId();
-            final boolean showPrivateMessageSeen = !suggestEdit && !isReactionsViewAvailable && currentChat == null && currentEncryptedChat == null && (currentUser != null && !UserObject.isUserSelf(currentUser) && !UserObject.isReplyUser(currentUser) && !UserObject.isAnonymous(currentUser) && !currentUser.bot && !UserObject.isService(currentUser.id)) && (userInfo == null || !userInfo.read_dates_private) && !isInScheduleMode() && message.isOutOwner() && message.isSent() && !message.isEditing() && !message.isSending() && !message.isSendError() && !message.isContentUnread() && !message.isUnread() && (ConnectionsManager.getInstance(currentAccount).getCurrentTime() - message.messageOwner.date < getMessagesController().pmReadDateExpirePeriod) && !(message.messageOwner.action instanceof TLRPC.TL_messageActionChatJoinedByRequest);
+            final boolean showPrivateMessageSeen = !suggestEdit && !isReactionsViewAvailable && currentChat == null && currentEncryptedChat == null && (currentUser != null && !UserObject.isUserSelf(currentUser) && !UserObject.isReplyUser(currentUser) && !UserObject.isAnonymous(currentUser) && !currentUser.bot && !UserObject.isService(currentUser.id)) && (userInfo == null || !userInfo.read_dates_private) && !isInScheduleMode() && message.isOutOwner() && message.isSent() && !message.isEditing() && !message.isSending() && !message.isSendError() && !message.isContentUnread() && !message.isUnread() && (ConnectionsManager.getInstance(currentAccount).getCurrentTime() - message.messageOwner.date < getMessagesController().pmReadDateExpirePeriod) && !(message.messageOwner.action instanceof TLRPC.TL_messageActionChatJoinedByRequest) && !isAyuDeleted;
             final boolean showPrivateMessageEdit = !suggestEdit && (currentUser == null || !UserObject.isReplyUser(currentUser) && !UserObject.isAnonymous(currentUser)) && !isInScheduleMode() && message.isEdited() && !(message.messageOwner.action instanceof TLRPC.TL_messageActionChatJoinedByRequest);
             final boolean showPrivateMessageFwdOriginal = !suggestEdit && false && (currentUser == null || !UserObject.isReplyUser(currentUser) && !UserObject.isAnonymous(currentUser)) && !isInScheduleMode() && message.isForwarded() && !(message.messageOwner.action instanceof TLRPC.TL_messageActionChatJoinedByRequest);
             final boolean showSponsorInfo = !suggestEdit && selectedObject != null && selectedObject.isSponsored() && (selectedObject.sponsoredInfo != null || selectedObject.sponsoredAdditionalInfo != null || selectedObject.sponsoredUrl != null && !selectedObject.sponsoredUrl.startsWith("https://" + getMessagesController().linkPrefix));
@@ -38270,6 +38258,8 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                     }
                 };
                 view.setBackgroundColor(0xFF00FF00);
+            } else if (viewType == -1000) {
+                view = new DummyView(mContext);
             } else {
                 view = new View(mContext);
             }
@@ -38865,29 +38855,53 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                 } else {
                     messages = ChatActivity.this.messages;
                 }
-
+                // return messages.get(position - messagesStartRow).contentType;
+                // Message filter start
                 var msg = messages.get(position - messagesStartRow);
-
-                // --- AyuGram hook
-                if (NaConfig.INSTANCE.getRegexFiltersEnabled().Bool() && (NaConfig.INSTANCE.getRegexFiltersEnableInChats().Bool() || ChatObject.isChannel(currentChat))) {
-                    var group = getGroup(msg.getGroupId());
-                    var msgToCheck = group == null ? msg : group.findCaptionMessageObject();
-
-                    if (AyuFilter.isFiltered(msgToCheck, group)) {
+                if (msg == null || msg.messageOwner != null && msg.messageOwner.hide) {
+                    return -1000;
+                }
+                if (NekoConfig.ignoreBlocked.Bool() && ChatObject.isMegagroup(currentChat)) {
+                    long fromId = msg.getFromChatId();
+                    if (isBlockedUser(fromId) || AyuFilter.isBlockedChannel(fromId)) {
+                        return -1000;
+                    }
+                    if (msg.replyMessageObject != null) {
+                        fromId = msg.replyMessageObject.getFromChatId();
+                        if (isBlockedUser(fromId) || AyuFilter.isBlockedChannel(fromId)) {
+                            return -1000;
+                        }
+                    }
+                }
+                if (AyuFilter.isFiltered(msg, getGroup(msg.getGroupId()))) {
+                    return -1000;
+                }
+                if (msg.contentType == 2) { // ChatUnreadCell
+                    int scanIndex = position - messagesStartRow - 1;
+                    boolean hasVisibleAfter = false;
+                    for (int i = scanIndex; i >= 0; i--) {
+                        var m = messages.get(i);
+                        if (m == null) continue;
+                        var g = getGroup(m.getGroupId());
+                        var fromId = m.getFromChatId();
+                        if (m.messageOwner != null && m.messageOwner.hide) {
+                            continue;
+                        }
+                        if (isBlockedUser(fromId) || AyuFilter.isBlockedChannel(fromId)) {
+                            continue;
+                        }
+                        if (AyuFilter.isFiltered(m, g)) {
+                            continue;
+                        }
+                        hasVisibleAfter = true;
+                        break;
+                    }
+                    if (!hasVisibleAfter) {
                         return -1000;
                     }
                 }
-                // --- AyuGram hook
-                // --- NaGram hook
-                if (msg != null && msg.messageOwner != null && msg.messageOwner.hide) {
-                    return -1000;
-                }
-                if (NekoConfig.ignoreBlocked.Bool() && msg != null && MessagesController.getInstance(currentAccount).blockePeers.indexOfKey(msg.getFromChatId()) >= 0) {
-                    return -1000;
-                }
-                // --- NaGram hook
-
                 return msg.contentType;
+                // Message filter end
             } else if (position == botInfoRow) {
                 return 3;
             } else if (position == userInfoRow) {
@@ -44846,9 +44860,11 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
             Integer end = ids.get(ids.size() - 1);
             for (int i = 0; i < messages.size(); i++) {
                 int msgId = messages.get(i).getId();
-                if (NekoConfig.ignoreBlocked.Bool() && getMessagesController().blockePeers.indexOfKey(messages.get(i).getSenderId()) >= 0)
+                long fromId = messages.get(i).getFromChatId();
+                if (isBlockedUser(fromId) || AyuFilter.isBlockedChannel(fromId)) {
                     continue;
-                if (NaConfig.INSTANCE.getRegexFiltersEnabled().Bool() && AyuFilter.isFiltered(messages.get(i), null)) {
+                }
+                if (AyuFilter.isFiltered(messages.get(i), null)) {
                     continue;
                 }
                 if (msgId > begin && msgId < end && selectedMessagesIds[0].indexOfKey(msgId) < 0) {
@@ -47604,5 +47620,9 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                                      boolean allowDelete, boolean allowEdit,
                                      boolean allowReply, boolean allowReplyPm,
                                      boolean allowForward) {
+    }
+
+    public boolean isBlockedUser(long senderId) {
+        return NekoConfig.ignoreBlocked.Bool() && getMessagesController().blockePeers.indexOfKey(senderId) >= 0;
     }
 }

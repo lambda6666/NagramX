@@ -43,6 +43,8 @@
     <string name="DeleteCloudBackupFailed">クラウドデータを消去できませんでした</string>
     <string name="DeleteCloudBackupSuccess">クラウドデータを消去しました</string>
     <string name="CloudConfigNoBackupToDelete">消去するデータがありません</string>
+    <string name="ClearRegexFilters">クリア</string>
+    <string name="ClearRegexFiltersAlertMessage">保存されているィルターをすべてクリアしてもよろしいですか？これにより、共通フィルターとチャット固有のフィルターの両方が削除されます。</string>
     <string name="PreferredTranslateTargetLang">カスタム優先言語リスト</string>
     <string name="PreferredTranslateTargetLangExample">例：ja, zh_cn, zh_tw</string>
     <string name="PreferredTranslateTargetLangName">優先言語</string>
@@ -50,11 +52,16 @@
     <string name="ClearDeletedAlertMessage">このチャット内のすべての削除済みメッセージをクリアしますか？</string>
     <string name="ForwardsRestrictedInfoAyuDeleted">転送は許可されていません。</string>
     <string name="RegexFiltersNotice">タップして編集。</string>
+    <string name="RegexFiltersImport">インポート</string>
+    <string name="RegexFiltersExport">エクスポート</string>
+    <string name="RegexFiltersImportSuccess">フィルターがインポートされました。</string>
+    <string name="RegexFiltersImportError">クリップボードからフィルターのインポートに失敗しました。</string>
+    <string name="RegexFiltersExportError">フィルターのエクスポートに失敗しました。</string>
     <string name="botCommandConfirmTitle">コマンド確認</string>
     <string name="botCommandConfirmText">このコマンドを送信しますか？\n\n%s</string>
     <string name="DisableScreenshotDetection">スクリーンショット検出を無効にする</string>
     <string name="MessageSavingSaveMedia">メディアを保存</string>
-    <string name="MessageSavingSaveMediaHint">詳細はこちらをタップ</string>
+    <string name="MessageSavingSaveMediaHint">詳細はこちらをタップ。</string>
     <string name="MessageSavingSaveMediaInPrivateChats">プライベートチャットで保存</string>
     <string name="MessageSavingSaveMediaInPublicChannels">パブリックチャンネルで保存</string>
     <string name="MessageSavingSaveMediaInPrivateChannels">プライベートチャンネルで保存</string>
@@ -243,4 +250,16 @@
     <string name="ExportSettingsIncludeApiKeys">API キーを含める</string>
     <string name="DisableInAppBrowserGestures">ジェスチャーを無効にする</string>
     <string name="HowToObtain">取得方法は？</string>
+    <string name="BlockChannel">ブロック</string>
+    <string name="UnblockChannel">ブロックを解除</string>
+    <string name="BlockedChannels">ブロックされたチャンネル</string>
+    <string name="BlockedChannelsCount_one">ブロック数 %1$d</string>
+    <string name="BlockedChannelsCount_other">ブロック数 %1$d</string>
+    <string name="BlockedChannelsInfo">グループ内でブロックしたチャンネルからのメッセージを非表示にできます。 %s</string>
+    <string name="ChannelBlocked">ブロックしました。</string>
+    <string name="ChannelUnblocked">ブロックを解除しました。</string>
+    <string name="BlockedChannelsEmpty">ブロックされたチャンネルはまだありません</string>
+    <string name="UnblockAllChannelsWarn">**すべてのチャンネル**のブロックを解除してもよろしいですか？</string>
+    <string name="BlockChannelsUnavailable">一部のチャンネルは一時的に表示できません。</string>
+    <string name="FixLinkPreview">リンクプレビューを修正</string>
 </resources>

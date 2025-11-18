@@ -80,6 +80,7 @@ import java.util.function.Function;
 
 import kotlin.text.StringsKt;
 import tw.nekomimi.nekogram.DatacenterActivity;
+import tw.nekomimi.nekogram.DialogConfig;
 import tw.nekomimi.nekogram.NekoConfig;
 import xyz.nextalone.nagram.NaConfig;
 import tw.nekomimi.nekogram.helpers.AppRestartHelper;
@@ -798,7 +799,7 @@ public class NekoSettingsActivity extends BaseFragment {
         mainconfig.add("disableVoiceAudioEffects");
         mainconfig.add("chatSwipeAction");
 
-        mainconfig.add("theme");
+        if (!isCloud) mainconfig.add("theme");
         mainconfig.add("selectedAutoNightType");
         mainconfig.add("autoNightScheduleByLocation");
         mainconfig.add("autoNightBrighnessThreshold");
@@ -813,19 +814,18 @@ public class NekoSettingsActivity extends BaseFragment {
 
         mainconfig.add("lang_code");
 
-        spToJSON("mainconfig", configJson, mainconfig::contains, isCloud);
-        spToJSON("themeconfig", configJson, null, isCloud);
-
-        spToJSON("nkmrcfg", configJson, null, isCloud, includeApiKeys);
+        spToJSON("mainconfig", configJson, mainconfig::contains);
+        if (!isCloud) spToJSON("themeconfig", configJson, null);
+        spToJSON("nkmrcfg", configJson, null, includeApiKeys);
 
         return configJson.toString(indentSpaces);
     }
 
-    private static void spToJSON(String sp, JSONObject object, Function<String, Boolean> filter, boolean isCloud) throws JSONException {
-        spToJSON(sp, object, filter, isCloud, true);
+    private static void spToJSON(String sp, JSONObject object, Function<String, Boolean> filter) throws JSONException {
+        spToJSON(sp, object, filter, true);
     }
 
-    private static void spToJSON(String sp, JSONObject object, Function<String, Boolean> filter, boolean isCloud, boolean includeApiKeys) throws JSONException {
+    private static void spToJSON(String sp, JSONObject object, Function<String, Boolean> filter, boolean includeApiKeys) throws JSONException {
         SharedPreferences preferences = ApplicationLoader.applicationContext.getSharedPreferences(sp, Activity.MODE_PRIVATE);
         JSONObject jsonConfig = new JSONObject();
         for (Map.Entry<String, ?> entry : preferences.getAll().entrySet()) {
@@ -833,10 +833,9 @@ public class NekoSettingsActivity extends BaseFragment {
             if (!includeApiKeys && (key.endsWith("Key") || key.contains("Token") || key.contains("AccountID"))) {
                 continue;
             }
-            if (isCloud && key.endsWith("Prompt")) {
+            if (filter != null && !filter.apply(key)) {
                 continue;
             }
-            if (filter != null && !filter.apply(key)) continue;
             if (entry.getValue() instanceof Long) {
                 key = key + "_long";
             } else if (entry.getValue() instanceof Float) {
@@ -915,7 +914,8 @@ public class NekoSettingsActivity extends BaseFragment {
         String[] preservePrefixes = {
                 AyuSavePreferences.saveExclusionPrefix,
                 ChatNameHelper.chatNameOverridePrefix,
-                NekoConfig.channelAliasPrefix
+                NekoConfig.channelAliasPrefix,
+                DialogConfig.customForumTabPrefix
         };
 
         for (Map.Entry<String, JsonElement> element : configJson.entrySet()) {
