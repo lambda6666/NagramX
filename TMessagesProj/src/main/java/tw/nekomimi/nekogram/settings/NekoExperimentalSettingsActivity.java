@@ -90,9 +90,24 @@ public class NekoExperimentalSettingsActivity extends BaseNekoXSettingsActivity 
     private final CellGroup cellGroup = new CellGroup(this);
 
     // Experimental
+    
     private final AbstractConfigCell headerExperimental = cellGroup.appendCell(new ConfigCellHeader(getString(R.string.Experimental)));
+
     private final AbstractConfigCell localPremiumRow = cellGroup.appendCell(new ConfigCellTextCheck(NekoConfig.localPremium));
-    private final AbstractConfigCell enhancedFileLoaderRow = cellGroup.appendCell(new ConfigCellTextCheck(NekoConfig.enhancedFileLoader));
+
+// 添加 AutoUpdateChannel 设置
+private final AbstractConfigCell autoUpdateChannelRow = cellGroup.appendCell(new ConfigCellSelectBox(
+    null,
+    NaConfig.INSTANCE.getAutoUpdateChannel(), 
+    new String[]{
+        getString(R.string.AutoCheckUpdateOFF),
+        getString(R.string.AutoCheckUpdateRelease), 
+        getString(R.string.AutoCheckUpdateBeta)
+    }, 
+    null
+));
+   
+     private final AbstractConfigCell enhancedFileLoaderRow = cellGroup.appendCell(new ConfigCellTextCheck(NekoConfig.enhancedFileLoader));
     private final AbstractConfigCell boostUploadRow = cellGroup.appendCell(new ConfigCellTextCheck(NekoConfig.uploadBoost));
     private final AbstractConfigCell disableFilteringRow = cellGroup.appendCell(new ConfigCellCustom("DisableFiltering", CellGroup.ITEM_TYPE_TEXT_CHECK, true));
     private final AbstractConfigCell unlimitedFavedStickersRow = cellGroup.appendCell(new ConfigCellTextCheck(NekoConfig.unlimitedFavedStickers, getString(R.string.UnlimitedFavoredStickersAbout)));
